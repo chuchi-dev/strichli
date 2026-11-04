@@ -6,6 +6,7 @@
 //! is no reload, no back or forward and no navigation inside a single page
 //! app. Days and hours are in the configured timezone.
 
+pub mod import;
 pub mod routes;
 
 use std::collections::HashMap;
@@ -18,10 +19,13 @@ use serde_json::{Map, Value};
 use crate::error::{Error, Result};
 use crate::sites::normalize_domain;
 
-const MIGRATIONS: &[(&str, &str)] = &[(
-	"create-events",
-	include_str!("./migrations/create-events.sql"),
-)];
+const MIGRATIONS: &[(&str, &str)] = &[
+	(
+		"create-events",
+		include_str!("./migrations/create-events.sql"),
+	),
+	("add-source", include_str!("./migrations/add-source.sql")),
+];
 
 const MAX_PATH: usize = 512;
 const MAX_KEY: usize = 64;
@@ -366,6 +370,19 @@ impl EventQuery {
 	}
 }
 
+/// How an import went
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportResult {
+	/// events of the earlier import of the same source, deleted
+	pub replaced: u64,
+	pub imported: u64,
+	/// events from when strichli already counted itself, left out
+	pub overlapping: u64,
+}
+
+const IMPORT_BATCH: usize = 1000;
+
 #[derive(FromRow)]
 struct FieldRow {
 	field: String,
@@ -590,6 +607,75 @@ impl Events {
 			pages,
 			referrers,
 			keys,
+		})
+	}
+
+	/// Replaces the events of an earlier import from this source. Only
+	/// events from before strichli's own first one are taken, so nothing
+	/// counts twice.
+	pub async fn import(
+		&self,
+		site_id: &UniqueId,
+		source: &str,
+		events: &[import::ImportedEvent],
+	) -> Result<ImportResult> {
+		let mut conn = self.db.get().await?;
+		let trans = conn.transaction().await?;
+		let conn = trans.connection();
+
+		let replaced = conn
+			.execute(
+				"DELETE FROM events WHERE site_id = $1 AND source = $2",
+				&[site_id, &source],
+			)
+			.await?;
+
+		let mut imported = 0;
+		for batch in events.chunks(IMPORT_BATCH) {
+			let ts: Vec<String> =
+				batch.iter().map(|e| e.ts.to_rfc3339()).collect();
+			let path: Vec<&str> =
+				batch.iter().map(|e| e.event.path.as_str()).collect();
+			let referrer: Vec<Option<&str>> =
+				batch.iter().map(|e| e.event.referrer.as_deref()).collect();
+			let unique: Vec<bool> =
+				batch.iter().map(|e| e.event.is_unique).collect();
+			let key: Vec<Option<&str>> =
+				batch.iter().map(|e| e.event.key.as_deref()).collect();
+			let data: Vec<Option<String>> = batch
+				.iter()
+				.map(|e| e.event.data.as_ref().map(Value::to_string))
+				.collect();
+
+			imported += conn
+				.execute(
+					"INSERT INTO events
+					(site_id, ts, path, referrer, is_unique, key, data, source)
+					SELECT $1, t.ts::timestamptz, t.path, t.referrer,
+						t.is_unique, t.key, t.data::jsonb, $2
+					FROM unnest(
+						$3::text[], $4::text[], $5::text[], $6::bool[],
+						$7::text[], $8::text[]
+					) AS t(ts, path, referrer, is_unique, key, data)
+					WHERE t.ts::timestamptz < COALESCE(
+						(SELECT min(e.ts) FROM events e
+						WHERE e.site_id = $1 AND e.source IS NULL),
+						'infinity'
+					)",
+					&[
+						site_id, &source, &ts, &path, &referrer, &unique, &key,
+						&data,
+					],
+				)
+				.await?;
+		}
+
+		trans.commit().await?;
+
+		Ok(ImportResult {
+			replaced,
+			imported,
+			overlapping: events.len() as u64 - imported,
 		})
 	}
 

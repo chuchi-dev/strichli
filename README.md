@@ -49,6 +49,23 @@ sites routes, send it as `authorization: Bearer <token>`.
 
 Deleting a site needs a webui session.
 
+### Import from Simple Analytics
+
+`POST /api/sites/{id}/import/simpleanalytics` (admins) takes the ndjson of
+Simple Analytics' export api and replaces an earlier import of the site.
+Only data points from before strichli's own first event are taken, so a
+parallel run doesn't count twice. Robots are left out, event data is
+requested per field as `metadata.<field>_text|_int|_bool`:
+
+```sh
+curl -s --get -H "Api-Key: $SA_KEY" \
+	--data-urlencode hostname=soerenmeier.ch \
+	--data fields=added_iso,path,is_unique,is_robot,referrer_hostname,datapoint,metadata.name_text \
+	'https://simpleanalytics.com/api/export/datapoints?version=6&format=ndjson&type=all&start=2015-01-01&end=2030-01-01' \
+	| curl -s -X POST https://strichli.goodserver.ch/api/sites/$SITE/import/simpleanalytics \
+		-H "authorization: Bearer $TOKEN" -H 'content-type: text/plain' --data-binary @-
+```
+
 ## Development
 
 Requires rust, node and a postgres.
