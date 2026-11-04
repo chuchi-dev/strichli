@@ -72,6 +72,8 @@ Formatting: `cargo fmt`, `npm run format`, checks: `cargo clippy`,
 public-addr = "https://strichli.goodserver.ch/"
 # days and hours of the stats, the default
 timezone = "Europe/Zurich"
+# origins that may embed the webui in a frame, none by default
+frame-ancestors = []
 
 [database]
 # a host or the directory of the unix socket

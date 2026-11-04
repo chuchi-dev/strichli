@@ -13,7 +13,7 @@ use std::{fs, io};
 use axum::Router;
 use axum::extract::FromRef;
 use axum::http::{Method, header};
-use axum::middleware::map_response;
+use axum::middleware::map_response_with_state;
 use clap::{Parser, Subcommand};
 use pg::Database;
 use serde::Deserialize;
@@ -24,6 +24,7 @@ use tower_http::cors::{self, CorsLayer};
 use tower_http::trace::TraceLayer;
 
 use crate::events::Events;
+use crate::headers::SecurityHeaders;
 use crate::limits::{Allowed, Limits};
 use crate::sites::Sites;
 use crate::users::{Users, hash_password};
@@ -80,6 +81,9 @@ pub struct Config {
 	/// Days and hours of the stats are in this timezone
 	#[serde(default = "default_timezone")]
 	timezone: String,
+	/// Origins that may embed the webui in a frame, none by default
+	#[serde(default)]
+	frame_ancestors: Vec<String>,
 	database: DbConf,
 }
 
@@ -132,7 +136,10 @@ fn create_app(state: AppState, enable_cors: bool) -> Router {
 		.nest("/api", api)
 		.merge(events::routes::routes())
 		.merge(webui::routes())
-		.layer(map_response(headers::security_headers))
+		.layer(map_response_with_state(
+			SecurityHeaders::new(&state.cfg.frame_ancestors),
+			headers::security_headers,
+		))
 		.layer(CompressionLayer::new())
 		.layer(TraceLayer::new_for_http());
 
