@@ -55,46 +55,53 @@
 	.presets {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 2px;
-		padding: 2px;
-		background-color: var(--wash);
-		border: 1px solid var(--border);
-		border-radius: 8px;
+		background-color: var(--surface);
+		border: 2px solid var(--border);
+		border-radius: var(--radius);
+		box-shadow: 3px 3px 0 var(--shadow);
+		overflow: hidden;
 	}
 
 	button {
-		padding: 0.3rem 0.65rem;
-		font-size: 0.85rem;
+		padding: 0.35rem 0.7rem;
+		font-family: var(--mono);
+		font-size: 0.78rem;
+		font-weight: 600;
 		color: var(--ink-2);
 		background: none;
 		border: none;
-		border-radius: var(--radius);
 		cursor: pointer;
 
 		&:hover {
+			color: var(--ink);
 			background-color: var(--wash);
 		}
 
 		&.active {
-			color: var(--ink);
-			font-weight: 600;
-			background-color: var(--surface);
-			box-shadow: 0 0 0 1px var(--border);
+			color: var(--marker-ink);
+			background-color: var(--marker);
 		}
+	}
+
+	.presets button + button {
+		border-left: 2px solid var(--border);
 	}
 
 	.custom {
 		display: flex;
 		gap: 0.4rem;
 		align-items: center;
+		font-family: var(--mono);
+		font-size: 0.8rem;
 
 		input {
 			padding: 0.25rem 0.4rem;
-			font-size: 0.85rem;
+			font-size: 0.8rem;
 		}
 
 		button {
-			border: 1px solid var(--border);
+			border: 2px solid var(--border);
+			border-radius: var(--radius);
 		}
 	}
 </style>

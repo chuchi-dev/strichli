@@ -112,14 +112,17 @@
 		padding: 1rem 1rem 0.9rem;
 		color: inherit;
 		text-decoration: none;
-		transition: border-color 0.15s ease;
+		transition:
+			transform 0.1s ease,
+			box-shadow 0.1s ease;
 
 		&:hover {
-			border-color: var(--axis);
+			transform: translate(-2px, -2px);
+			box-shadow: 6px 6px 0 var(--shadow);
 		}
 
 		&:focus-visible {
-			outline: 2px solid var(--accent);
+			outline: 3px solid var(--marker);
 			outline-offset: 2px;
 		}
 	}
@@ -178,10 +181,11 @@
 		display: flex;
 		gap: 0.5rem;
 		padding: 0.15rem 0.4rem;
-		font-size: 0.8rem;
+		font-family: var(--mono);
+		font-size: 0.75rem;
 		background-color: var(--surface);
-		border: 1px solid var(--border);
-		border-radius: 4px;
+		border: 2px solid var(--border);
+		border-radius: var(--radius);
 		pointer-events: none;
 	}
 
@@ -199,21 +203,24 @@
 	}
 
 	.name {
-		font-weight: 600;
-		font-size: 1.1rem;
+		font-weight: 800;
+		font-size: 1.2rem;
+		letter-spacing: -0.01em;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
 
 	.domain {
-		font-size: 0.85rem;
+		font-family: var(--mono);
+		font-size: 0.75rem;
 		color: var(--muted);
 	}
 
 	.count {
-		font-size: 1.6rem;
-		font-weight: 700;
+		font-family: var(--mono);
+		font-size: 1.7rem;
+		font-weight: 600;
 		font-variant-numeric: tabular-nums;
 		line-height: 1;
 	}

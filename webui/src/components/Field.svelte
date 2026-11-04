@@ -42,8 +42,11 @@
 	}
 
 	.label {
-		font-size: 0.85rem;
+		font-family: var(--mono);
+		font-size: 0.72rem;
 		font-weight: 600;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
 		color: var(--ink-2);
 	}
 </style>

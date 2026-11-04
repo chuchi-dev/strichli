@@ -241,7 +241,8 @@
 		display: flex;
 		gap: 1rem;
 		list-style: none;
-		font-size: 0.85rem;
+		font-family: var(--mono);
+		font-size: 0.78rem;
 		color: var(--ink-2);
 
 		li {
@@ -253,10 +254,13 @@
 
 	.toggle {
 		padding: 0.2rem 0.5rem;
-		font-size: 0.8rem;
+		font-family: var(--mono);
+		font-size: 0.75rem;
+		font-weight: 600;
+		text-transform: uppercase;
 		color: var(--ink-2);
 		background: none;
-		border: 1px solid var(--border);
+		border: 2px solid var(--border);
 		border-radius: var(--radius);
 		cursor: pointer;
 
@@ -297,7 +301,8 @@
 	}
 
 	.tick {
-		font-size: 11px;
+		font-family: var(--mono);
+		font-size: 10.5px;
 		fill: var(--muted);
 		font-variant-numeric: tabular-nums;
 
@@ -347,14 +352,14 @@
 		font-size: 0.85rem;
 		color: var(--ink-2);
 		background-color: var(--surface);
-		border: 1px solid var(--border);
+		border: 2px solid var(--border);
 		border-radius: var(--radius);
-		box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+		box-shadow: 3px 3px 0 var(--shadow);
 		pointer-events: none;
 
 		.title {
 			margin-bottom: 0.25rem;
-			font-weight: 600;
+			font-weight: 700;
 			color: var(--ink);
 		}
 

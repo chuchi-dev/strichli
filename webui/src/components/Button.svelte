@@ -30,21 +30,39 @@
 {/if}
 
 <style lang="scss">
+	// a chunky button that presses down into its shadow
 	.button {
 		display: inline-block;
-		padding: 0.45rem 0.9rem;
+		padding: 0.5rem 1rem;
+		font-family: var(--mono);
+		font-size: 0.8rem;
 		font-weight: 600;
-		font-size: 0.9rem;
+		letter-spacing: 0.05em;
+		text-transform: uppercase;
 		text-decoration: none;
-		border: 1px solid transparent;
+		color: var(--ink);
+		background-color: var(--surface);
+		border: 2px solid var(--border);
 		border-radius: var(--radius);
+		box-shadow: 3px 3px 0 var(--shadow);
 		cursor: pointer;
 		transition:
-			background-color 0.15s ease,
-			border-color 0.15s ease;
+			transform 0.08s ease,
+			box-shadow 0.08s ease,
+			background-color 0.15s ease;
+
+		&:hover:not(:disabled) {
+			transform: translate(-1px, -1px);
+			box-shadow: 4px 4px 0 var(--shadow);
+		}
+
+		&:active:not(:disabled) {
+			transform: translate(3px, 3px);
+			box-shadow: 0 0 0 var(--shadow);
+		}
 
 		&:focus-visible {
-			outline: 2px solid var(--accent);
+			outline: 3px solid var(--marker);
 			outline-offset: 2px;
 		}
 
@@ -55,31 +73,11 @@
 	}
 
 	.primary {
-		background-color: var(--accent);
-		color: #fff;
-
-		&:hover:not(:disabled) {
-			background-color: var(--accent-ink);
-		}
-	}
-
-	.secondary {
-		background-color: var(--surface);
-		border-color: var(--axis);
-		color: var(--ink);
-
-		&:hover:not(:disabled) {
-			background-color: var(--wash);
-		}
+		color: var(--marker-ink);
+		background-color: var(--marker);
 	}
 
 	.danger {
-		background-color: var(--surface);
-		border-color: var(--danger);
 		color: var(--danger);
-
-		&:hover:not(:disabled) {
-			background-color: var(--wash);
-		}
 	}
 </style>

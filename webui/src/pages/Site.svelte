@@ -285,22 +285,28 @@
 	}
 
 	.domain {
+		font-family: var(--mono);
+		font-size: 0.85rem;
 		color: var(--ink-2);
-		font-size: 0.9rem;
 	}
 
 	.tabs {
 		display: flex;
 		gap: 0.25rem;
-		margin-bottom: 1.5rem;
-		border-bottom: 1px solid var(--border);
+		margin-bottom: 1.75rem;
+		border-bottom: 2px solid var(--border);
 
 		a {
-			padding: 0.5rem 0.8rem;
-			margin-bottom: -1px;
+			padding: 0.5rem 0.9rem;
+			margin-bottom: -2px;
+			font-family: var(--mono);
+			font-size: 0.82rem;
+			font-weight: 600;
+			letter-spacing: 0.05em;
+			text-transform: uppercase;
 			color: var(--ink-2);
 			text-decoration: none;
-			border-bottom: 2px solid transparent;
+			border-bottom: 5px solid transparent;
 
 			&:hover {
 				color: var(--ink);
@@ -308,15 +314,14 @@
 
 			&.active {
 				color: var(--ink);
-				font-weight: 600;
-				border-bottom-color: var(--accent);
+				border-bottom-color: var(--marker);
 			}
 		}
 	}
 
 	.new {
 		margin-bottom: 1.5rem;
-		border-color: var(--accent);
+		box-shadow: 4px 4px 0 var(--marker);
 
 		.hint {
 			margin-top: 0.75rem;
@@ -331,16 +336,22 @@
 
 	.tile {
 		display: grid;
-		min-width: 10rem;
+		min-width: 11rem;
 
 		.label {
-			font-size: 0.85rem;
-			color: var(--ink-2);
+			font-family: var(--mono);
+			font-size: 0.72rem;
+			font-weight: 600;
+			letter-spacing: 0.06em;
+			text-transform: uppercase;
+			color: var(--muted);
 		}
 
 		.value {
-			font-size: 2rem;
-			font-weight: 700;
+			font-size: 2.6rem;
+			font-weight: 800;
+			letter-spacing: -0.02em;
+			line-height: 1.1;
 		}
 	}
 
@@ -353,8 +364,10 @@
 	}
 
 	.more {
-		margin-top: 0.75rem;
+		margin-top: 1rem;
 		text-align: right;
+		font-family: var(--mono);
+		font-size: 0.85rem;
 	}
 
 	.hint {
@@ -362,7 +375,6 @@
 	}
 
 	code {
-		font-family: ui-monospace, 'SF Mono', Menlo, monospace;
 		font-size: 0.85em;
 	}
 

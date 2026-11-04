@@ -147,7 +147,7 @@
 	}
 
 	code {
-		font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+		font-family: var(--mono);
 		font-size: 0.85em;
 	}
 

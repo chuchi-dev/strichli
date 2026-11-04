@@ -66,7 +66,11 @@
 		align-items: baseline;
 
 		.unit {
-			font-size: 0.85rem;
+			font-family: var(--mono);
+			font-size: 0.72rem;
+			font-weight: 600;
+			letter-spacing: 0.06em;
+			text-transform: uppercase;
 			color: var(--muted);
 		}
 	}
@@ -90,6 +94,7 @@
 		position: absolute;
 		inset: 0 auto 0 0;
 		background-color: var(--bar-tint);
+		border-left: 3px solid var(--series-1);
 		border-radius: 0 4px 4px 0;
 	}
 
@@ -106,7 +111,8 @@
 
 	.more {
 		margin-top: 0.5rem;
-		font-size: 0.85rem;
+		font-family: var(--mono);
+		font-size: 0.78rem;
 		color: var(--accent-ink);
 		background: none;
 		border: none;

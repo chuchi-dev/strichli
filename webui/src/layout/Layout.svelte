@@ -46,19 +46,19 @@
 <style lang="scss">
 	header {
 		background-color: var(--surface);
-		border-bottom: 1px solid var(--border);
+		border-bottom: 2px solid var(--border);
 	}
 
 	.inner,
 	main {
-		max-width: 1100px;
+		max-width: 1160px;
 		margin: 0 auto;
 		padding: 0 1.25rem;
 	}
 
 	.inner {
 		display: flex;
-		height: 3.5rem;
+		height: 4rem;
 		align-items: center;
 		justify-content: space-between;
 		gap: 1rem;
@@ -67,20 +67,21 @@
 	.logo {
 		display: flex;
 		align-items: center;
-		gap: 0.5rem;
-		font-weight: 700;
-		font-size: 1.1rem;
+		gap: 0.55rem;
+		font-weight: 800;
+		font-size: 1.45rem;
+		letter-spacing: -0.02em;
 		color: var(--ink);
 		text-decoration: none;
 
 		svg {
-			width: 1.6rem;
-			height: 1.6rem;
+			width: 2rem;
+			height: 2rem;
 			stroke: var(--series-1);
 		}
 
 		.strike {
-			stroke: var(--series-2);
+			stroke: var(--marker);
 		}
 	}
 
@@ -91,24 +92,34 @@
 
 		a {
 			padding: 0.35rem 0.6rem;
-			border-radius: var(--radius);
+			font-family: var(--mono);
+			font-size: 0.8rem;
+			font-weight: 600;
+			letter-spacing: 0.05em;
+			text-transform: uppercase;
 			color: var(--ink-2);
 			text-decoration: none;
 			white-space: nowrap;
+			border-radius: var(--radius);
 
 			&:hover {
+				color: var(--ink);
 				background-color: var(--wash);
 			}
 
+			// a marker stroke under the current page
 			&.active {
 				color: var(--ink);
-				font-weight: 600;
+				background-image: linear-gradient(var(--marker), var(--marker));
+				background-size: calc(100% - 1.2rem) 4px;
+				background-position: center bottom 0.15rem;
+				background-repeat: no-repeat;
 			}
 		}
 	}
 
 	main {
-		padding-top: 2rem;
+		padding-top: 2.5rem;
 		padding-bottom: 4rem;
 	}
 

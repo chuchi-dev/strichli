@@ -31,6 +31,8 @@
 		"vite": "^8.3.4"
 	},
 	"dependencies": {
+		"@fontsource-variable/bricolage-grotesque": "^5.3.0",
+		"@fontsource/ibm-plex-mono": "^5.3.0",
 		"chuchi": "^0.1.6",
 		"chuchi-utils": "^0.1.6"
 	}

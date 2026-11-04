@@ -159,7 +159,8 @@
 		display: flex;
 		gap: 0.4rem;
 		align-items: center;
-		font-size: 0.85rem;
+		font-family: var(--mono);
+		font-size: 0.78rem;
 		color: var(--ink-2);
 
 		.key {
@@ -175,7 +176,8 @@
 	}
 
 	.sort {
-		font-size: 0.85rem;
+		font-family: var(--mono);
+		font-size: 0.78rem;
 		color: var(--ink-2);
 
 		select {
@@ -187,6 +189,6 @@
 	.grid {
 		display: grid;
 		grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr));
-		gap: 1rem;
+		gap: 1.5rem;
 	}
 </style>

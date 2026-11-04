@@ -119,7 +119,7 @@
 			Found <strong>{num(rows.length)}</strong>
 			{rows.length === 1 ? 'row' : 'rows'} with a total of
 			<strong>{num(total)}</strong>
-			 events.
+			events.
 		{:else}
 			No events in this time{filter ? ' that match the filter' : ''}. Send
 			them with
@@ -185,14 +185,15 @@
 
 	.chip {
 		padding: 0.25rem 0.55rem;
-		font-size: 0.85rem;
-		background-color: var(--wash);
-		border: 1px solid var(--border);
+		font-family: var(--mono);
+		font-size: 0.8rem;
+		background-color: var(--surface);
+		border: 2px solid var(--border);
 		border-radius: 999px;
 		cursor: pointer;
 
 		&:hover {
-			border-color: var(--axis);
+			background-color: var(--wash);
 		}
 
 		span {
@@ -201,15 +202,21 @@
 	}
 
 	.download {
-		padding: 0.35rem 0.7rem;
-		font-size: 0.85rem;
+		padding: 0.4rem 0.8rem;
+		font-family: var(--mono);
+		font-size: 0.78rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
 		background-color: var(--surface);
-		border: 1px solid var(--axis);
+		border: 2px solid var(--border);
 		border-radius: var(--radius);
+		box-shadow: 3px 3px 0 var(--shadow);
 		cursor: pointer;
 
-		&:hover:not(:disabled) {
-			background-color: var(--wash);
+		&:active:not(:disabled) {
+			transform: translate(3px, 3px);
+			box-shadow: none;
 		}
 
 		&:disabled {
@@ -224,12 +231,11 @@
 	}
 
 	.key {
-		font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+		font-family: var(--mono);
 		font-size: 0.9em;
 	}
 
 	code {
-		font-family: ui-monospace, 'SF Mono', Menlo, monospace;
 		font-size: 0.85em;
 	}
 
