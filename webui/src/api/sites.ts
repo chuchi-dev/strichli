@@ -33,7 +33,18 @@ export type Stats = {
 	keys: { key: string; count: number }[];
 };
 
-export type ValueCount = { field: string; value: string; count: number };
+export type EventRow = {
+	key: string;
+	/** field to value, null if the event had no such field */
+	values: Record<string, string | number | boolean | null>;
+	count: number;
+};
+
+export type EventTable = {
+	/** the data fields of the keys in the range */
+	fields: string[];
+	rows: EventRow[];
+};
 
 /** days as `YYYY-MM-DD`, both included */
 export type Range = { from: string; to: string };
@@ -69,12 +80,12 @@ export async function getStats(id: string, range: Range): Promise<Stats> {
 	return await get(`sites/${id}/stats?${query(range)}`);
 }
 
-export async function getValues(
+/** the keys grouped by the values of the data fields (at most 5) */
+export async function getEvents(
 	id: string,
-	key: string,
 	range: Range,
-): Promise<ValueCount[]> {
-	return await get(
-		`sites/${id}/keys/${encodeURIComponent(key)}?${query(range)}`,
-	);
+	fields: string[],
+): Promise<EventTable> {
+	const f = encodeURIComponent(fields.join(','));
+	return await get(`sites/${id}/events?${query(range)}&fields=${f}`);
 }

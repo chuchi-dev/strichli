@@ -1,27 +1,51 @@
 <script module lang="ts">
-	import { getSite, getStats } from '@/api/sites';
+	import { getEvents, getSite, getStats } from '@/api/sites';
 	import { rangeFromProps } from '@/lib/range';
 
-	type Props = { id: string; range?: string; from?: string; to?: string };
+	type Props = {
+		id: string;
+		tab?: string;
+		range?: string;
+		from?: string;
+		to?: string;
+	};
+
+	const MAX_COLUMNS = 5;
 
 	export async function loadProps(props: Props) {
 		const { range, preset } = rangeFromProps(props);
-		const [site, stats] = await Promise.all([
-			getSite(props.id),
-			getStats(props.id, range),
-		]);
+		const tab =
+			props.tab === 'events' || props.tab === 'settings'
+				? props.tab
+				: 'visitors';
+		const site = await getSite(props.id);
+		const base = { site, current: range, preset, tab };
 
-		return { site, stats, current: range, preset };
+		if (tab === 'events') {
+			// the fields come with the first answer, show them as columns
+			let events = await getEvents(props.id, range, []);
+			const columns = events.fields.slice(0, MAX_COLUMNS);
+			if (columns.length)
+				events = await getEvents(props.id, range, columns);
+			return { ...base, events, columns };
+		}
+
+		if (tab === 'visitors') {
+			return { ...base, stats: await getStats(props.id, range) };
+		}
+
+		return base;
 	}
 </script>
 
 <script lang="ts">
-	import type { Range, Site, Stats, ValueCount } from '@/api/sites';
-	import { deleteSite, getValues, updateSite } from '@/api/sites';
+	import type { EventTable, Range, Site, Stats } from '@/api/sites';
+	import { deleteSite, updateSite } from '@/api/sites';
 	import BarList from '@/components/BarList.svelte';
 	import Button from '@/components/Button.svelte';
 	import Chart from '@/components/Chart.svelte';
 	import Copy from '@/components/Copy.svelte';
+	import EventsView from '@/components/EventsView.svelte';
 	import Field from '@/components/Field.svelte';
 	import RangePicker from '@/components/RangePicker.svelte';
 	import { num } from '@/lib/format';
@@ -29,14 +53,26 @@
 
 	type Loaded = {
 		site: Site;
-		stats: Stats;
 		current: Range;
 		preset: string | null;
+		tab: 'visitors' | 'events' | 'settings';
+		stats?: Stats;
+		events?: EventTable;
+		columns?: string[];
 		/** just added, show how to include the script */
 		new?: string;
 	};
 
-	const { site, stats, current, preset, new: isNew }: Loaded = $props();
+	const {
+		site,
+		current,
+		preset,
+		tab,
+		stats,
+		events,
+		columns = [],
+		new: isNew,
+	}: Loaded = $props();
 
 	const router = getRouter();
 	const user = getSession().user;
@@ -45,41 +81,33 @@
 		document.title = `${site.name} - strichli`;
 	});
 
-	const base = $derived(`/sites/${site.id}`);
+	/** the page with another tab or range, the rest stays */
+	function link(opts: { tab?: string; range?: string; custom?: Range }) {
+		// eslint-disable-next-line svelte/prefer-svelte-reactivity -- a local value, not state
+		const params = new URLSearchParams();
+		const t = opts.tab ?? tab;
+		if (t !== 'visitors') params.set('tab', t);
 
-	// keys
-	let key: string | null = $state(null);
-	let values: ValueCount[] = $state([]);
-	let valuesError = $state('');
-
-	async function selectKey(k: string) {
-		if (key === k) {
-			key = null;
-			return;
+		if (opts.custom) {
+			params.set('from', opts.custom.from);
+			params.set('to', opts.custom.to);
+		} else if (opts.range ?? preset) {
+			params.set('range', (opts.range ?? preset)!);
+		} else {
+			params.set('from', current.from);
+			params.set('to', current.to);
 		}
 
-		key = k;
-		values = [];
-		valuesError = '';
-		try {
-			values = await getValues(site.id, k, current);
-		} catch (e: any) {
-			valuesError = e.message;
-		}
+		return `/sites/${site.id}?${params}`;
 	}
 
-	const fields = $derived(
-		Object.entries(
-			values.reduce<Record<string, ValueCount[]>>((acc, v) => {
-				(acc[v.field] ??= []).push(v);
-				return acc;
-			}, {}),
-		),
-	);
+	const TABS = [
+		{ id: 'visitors', label: 'Visitors' },
+		{ id: 'events', label: 'Events' },
+		{ id: 'settings', label: 'Settings', admin: true },
+	];
 
 	// settings
-	// svelte-ignore state_referenced_locally
-	let showSettings = $state(!!isNew);
 	// svelte-ignore state_referenced_locally
 	let domain = $state(site.domain);
 	// svelte-ignore state_referenced_locally
@@ -92,7 +120,7 @@
 
 		try {
 			await updateSite(site.id, domain, name);
-			router.open(base);
+			router.open(link({}));
 		} catch (e: any) {
 			settingsError = e.message;
 		}
@@ -128,13 +156,27 @@
 		</a>
 	</div>
 
-	<RangePicker
-		range={current}
-		{preset}
-		onpreset={id => router.open(`${base}?range=${id}`)}
-		oncustom={r => router.open(`${base}?from=${r.from}&to=${r.to}`)}
-	/>
+	{#if tab !== 'settings'}
+		<RangePicker
+			range={current}
+			{preset}
+			onpreset={id => router.open(link({ range: id }))}
+			oncustom={r => router.open(link({ custom: r }))}
+		/>
+	{/if}
 </div>
+
+<nav class="tabs">
+	{#each TABS.filter(t => !t.admin || $user?.admin) as t (t.id)}
+		<a
+			href={link({ tab: t.id })}
+			class:active={t.id === tab}
+			aria-current={t.id === tab ? 'page' : undefined}
+		>
+			{t.label}
+		</a>
+	{/each}
+</nav>
 
 {#if isNew}
 	<div class="card new">
@@ -148,114 +190,83 @@
 	</div>
 {/if}
 
-<div class="tiles">
-	<div class="card tile">
-		<span class="label">Visitors</span>
-		<span class="value">{num(stats.visitors)}</span>
-	</div>
-	<div class="card tile">
-		<span class="label">Pageviews</span>
-		<span class="value">{num(stats.pageviews)}</span>
-	</div>
-</div>
-
-<div class="card">
-	<Chart buckets={stats.buckets} hourly={stats.hourly} />
-</div>
-
-<div class="grid">
-	<BarList
-		title="Pages"
-		unit="Pageviews"
-		items={stats.pages}
-		value={p => p.pageviews}
-	>
-		{#snippet label(p)}{p.path}{/snippet}
-	</BarList>
-
-	<BarList
-		title="Referrers"
-		unit="Visitors"
-		items={stats.referrers}
-		value={r => r.visitors}
-	>
-		{#snippet label(r)}
-			{#if r.referrer}{r.referrer}{:else}<span class="muted">
-					Direct or unknown
-				</span>{/if}
-		{/snippet}
-	</BarList>
-</div>
-
-<div class="grid">
-	<BarList
-		title="Keys"
-		unit="Count"
-		items={stats.keys}
-		value={k => k.count}
-		empty="No keys in this time."
-		onselect={k => selectKey(k.key)}
-		selected={k => k.key === key}
-	>
-		{#snippet label(k)}{k.key}{/snippet}
-	</BarList>
-
-	{#if key}
-		<div class="values">
-			{#if valuesError}
-				<p class="error">{valuesError}</p>
-			{:else if !fields.length}
-				<div class="card">
-					<h2>{key}</h2>
-					<p class="muted">No data sent with this key.</p>
-				</div>
-			{/if}
-			{#each fields as [field, counts] (field)}
-				<BarList
-					title="{key}: {field}"
-					unit="Count"
-					items={counts}
-					value={v => v.count}
-				>
-					{#snippet label(v)}{v.value}{/snippet}
-				</BarList>
-			{/each}
+{#if tab === 'visitors' && stats}
+	<div class="tiles">
+		<div class="card tile">
+			<span class="label">Visitors</span>
+			<span class="value">{num(stats.visitors)}</span>
 		</div>
-	{:else}
-		<div class="card hint">
-			Click a key to see the values of its data. Send keys with
-			<pre class="code">{keyExample}</pre>
+		<div class="card tile">
+			<span class="label">Pageviews</span>
+			<span class="value">{num(stats.pageviews)}</span>
 		</div>
+	</div>
+
+	<div class="card">
+		<Chart buckets={stats.buckets} hourly={stats.hourly} />
+	</div>
+
+	<div class="grid">
+		<BarList
+			title="Pages"
+			unit="Pageviews"
+			items={stats.pages}
+			value={p => p.pageviews}
+		>
+			{#snippet label(p)}{p.path}{/snippet}
+		</BarList>
+
+		<BarList
+			title="Referrers"
+			unit="Visitors"
+			items={stats.referrers}
+			value={r => r.visitors}
+		>
+			{#snippet label(r)}
+				{#if r.referrer}{r.referrer}{:else}<span class="muted">
+						Direct or unknown
+					</span>{/if}
+			{/snippet}
+		</BarList>
+
+		<BarList
+			title="Events"
+			unit="Count"
+			items={stats.keys}
+			value={k => k.count}
+			empty="No events in this time."
+		>
+			{#snippet label(k)}{k.key}{/snippet}
+		</BarList>
+	</div>
+
+	{#if stats.keys.length}
+		<p class="more">
+			<a href={link({ tab: 'events' })}>All events with their data →</a>
+		</p>
 	{/if}
-</div>
+{:else if tab === 'events' && events}
+	<EventsView siteId={site.id} range={current} table={events} {columns} />
+{:else if tab === 'settings'}
+	<div class="card">
+		<h2>Script</h2>
+		<Copy text={site.snippet} />
+		<p class="hint">
+			Send events with <code>{keyExample}</code>
+		</p>
 
-{#if $user?.admin}
-	<div class="settings">
-		{#if !showSettings}
-			<Button kind="secondary" onclick={() => (showSettings = true)}>
-				Settings
-			</Button>
-		{:else}
-			<div class="card">
-				<h2>Script</h2>
-				<Copy text={site.snippet} />
-
-				<h2 class="space">Settings</h2>
-				<form class="form" onsubmit={save}>
-					<Field label="Domain" bind:value={domain} required />
-					<Field label="Name" bind:value={name} required />
-					{#if settingsError}
-						<p class="error">{settingsError}</p>
-					{/if}
-					<div class="row-buttons">
-						<Button type="submit">Save</Button>
-						<Button kind="danger" onclick={remove}>
-							Delete site
-						</Button>
-					</div>
-				</form>
+		<h2 class="space">Site</h2>
+		<form class="form" onsubmit={save}>
+			<Field label="Domain" bind:value={domain} required />
+			<Field label="Name" bind:value={name} required />
+			{#if settingsError}
+				<p class="error">{settingsError}</p>
+			{/if}
+			<div class="row-buttons">
+				<Button type="submit">Save</Button>
+				<Button kind="danger" onclick={remove}>Delete site</Button>
 			</div>
-		{/if}
+		</form>
 	</div>
 {/if}
 
@@ -266,7 +277,7 @@
 		justify-content: space-between;
 		align-items: flex-start;
 		gap: 1rem;
-		margin-bottom: 1.5rem;
+		margin-bottom: 1rem;
 
 		h1 {
 			margin-bottom: 0.1rem;
@@ -276,6 +287,31 @@
 	.domain {
 		color: var(--ink-2);
 		font-size: 0.9rem;
+	}
+
+	.tabs {
+		display: flex;
+		gap: 0.25rem;
+		margin-bottom: 1.5rem;
+		border-bottom: 1px solid var(--border);
+
+		a {
+			padding: 0.5rem 0.8rem;
+			margin-bottom: -1px;
+			color: var(--ink-2);
+			text-decoration: none;
+			border-bottom: 2px solid transparent;
+
+			&:hover {
+				color: var(--ink);
+			}
+
+			&.active {
+				color: var(--ink);
+				font-weight: 600;
+				border-bottom-color: var(--accent);
+			}
+		}
 	}
 
 	.new {
@@ -310,28 +346,24 @@
 
 	.grid {
 		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
+		grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
 		gap: 1rem;
 		margin-top: 1rem;
 		align-items: start;
 	}
 
-	.values {
-		display: grid;
-		gap: 1rem;
+	.more {
+		margin-top: 0.75rem;
+		text-align: right;
 	}
 
-	.hint pre {
+	.hint {
 		margin-top: 0.5rem;
 	}
 
 	code {
 		font-family: ui-monospace, 'SF Mono', Menlo, monospace;
 		font-size: 0.85em;
-	}
-
-	.settings {
-		margin-top: 2rem;
 	}
 
 	.space {

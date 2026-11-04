@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::AppState;
 use crate::error::{Error, Result};
-use crate::events::{Bucket, Range, Stats, ValueCount};
+use crate::events::{Bucket, EventQuery, EventTable, Range, Stats};
 use crate::users::Caller;
 
 use super::Site;
@@ -126,15 +126,15 @@ async fn stats(
 	Ok(Json(state.events.stats(&site.id, &range).await?))
 }
 
-async fn values(
+async fn events(
 	State(state): State<AppState>,
 	caller: Caller,
-	Path((id, key)): Path<(UniqueId, String)>,
-	Query(range): Query<Range>,
-) -> Result<Json<Vec<ValueCount>>> {
+	Path(id): Path<UniqueId>,
+	Query(query): Query<EventQuery>,
+) -> Result<Json<EventTable>> {
 	let site = state.sites.get(&caller.user, &id).await?;
 
-	Ok(Json(state.events.values(&site.id, &range, &key).await?))
+	Ok(Json(state.events.events(&site.id, &query).await?))
 }
 
 pub fn routes() -> Router<AppState> {
@@ -142,5 +142,5 @@ pub fn routes() -> Router<AppState> {
 		.route("/", get(list).post(create))
 		.route("/{id}", get(get_site).put(update).delete(delete))
 		.route("/{id}/stats", get(stats))
-		.route("/{id}/keys/{key}", get(values))
+		.route("/{id}/events", get(events))
 }

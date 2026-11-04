@@ -10,9 +10,6 @@
 		value: (item: T) => number;
 		label: Snippet<[T]>;
 		empty?: string;
-		/** makes the rows buttons */
-		onselect?: (item: T) => void;
-		selected?: (item: T) => boolean;
 	};
 
 	const {
@@ -22,8 +19,6 @@
 		value,
 		label,
 		empty = 'Nothing yet',
-		onselect,
-		selected,
 	}: Props = $props();
 
 	const LIMIT = 10;
@@ -45,18 +40,12 @@
 	{:else}
 		<ul>
 			{#each shown as item, i (i)}
-				<li class:selected={selected?.(item)}>
+				<li>
 					<span
 						class="bar"
 						style:width="{(value(item) / max) * 100}%"
 					></span>
-					{#if onselect}
-						<button class="name" onclick={() => onselect(item)}>
-							{@render label(item)}
-						</button>
-					{:else}
-						<span class="name">{@render label(item)}</span>
-					{/if}
+					<span class="name">{@render label(item)}</span>
 					<span class="value num">{num(value(item))}</span>
 				</li>
 			{/each}
@@ -95,11 +84,6 @@
 		gap: 1rem;
 		padding: 0.3rem 0.5rem;
 		font-size: 0.9rem;
-
-		&.selected .bar {
-			background-color: var(--series-1);
-			opacity: 0.35;
-		}
 	}
 
 	.bar {
@@ -118,20 +102,6 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
-	}
-
-	button.name {
-		text-align: left;
-		background: none;
-		border: none;
-		cursor: pointer;
-		text-decoration: underline;
-		text-decoration-color: var(--axis);
-		text-underline-offset: 3px;
-
-		&:hover {
-			text-decoration-color: var(--ink);
-		}
 	}
 
 	.more {

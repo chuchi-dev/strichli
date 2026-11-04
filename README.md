@@ -43,7 +43,9 @@ sites routes, send it as `authorization: Bearer <token>`.
   the `snippet`
 - `PUT /api/sites/{id}` `{ "domain", "name" }`
 - `GET /api/sites/{id}/stats?from=YYYY-MM-DD&to=YYYY-MM-DD`
-- `GET /api/sites/{id}/keys/{key}?from=…&to=…` the values of a key's data
+- `GET /api/sites/{id}/events?from=…&to=…&fields=domain,plan[&key=…]` the
+  events grouped by key and the values of up to 5 data fields, with the
+  fields there are
 
 Deleting a site needs a webui session.
 

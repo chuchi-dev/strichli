@@ -308,12 +308,67 @@ pub struct KeyCount {
 	pub count: i64,
 }
 
+/// A key with the values of the chosen data fields and how often it was
+/// sent with them
 #[derive(Debug, Clone, Serialize, FromRow)]
 #[serde(rename_all = "camelCase")]
-pub struct ValueCount {
-	pub field: String,
-	pub value: String,
+pub struct EventRow {
+	pub key: String,
+	/// field to value, null if the event had no such field
+	pub values: Value,
 	pub count: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EventTable {
+	/// the data fields of the keys in the range, to choose columns from
+	pub fields: Vec<String>,
+	pub rows: Vec<EventRow>,
+}
+
+/// Which events and how to group them
+#[derive(Debug, Clone, Deserialize)]
+pub struct EventQuery {
+	#[serde(flatten)]
+	pub range: Range,
+	/// data fields to group by, comma separated
+	#[serde(default)]
+	pub fields: String,
+	/// only this key
+	#[serde(default)]
+	pub key: Option<String>,
+}
+
+const MAX_COLUMNS: usize = 5;
+const MAX_ROWS: usize = 1000;
+
+impl EventQuery {
+	fn columns(&self) -> Result<Vec<String>> {
+		let columns: Vec<String> = self
+			.fields
+			.split(',')
+			.map(str::trim)
+			.filter(|f| !f.is_empty())
+			.map(String::from)
+			.collect();
+
+		if columns.len() > MAX_COLUMNS {
+			return Err(Error::Invalid(format!(
+				"at most {MAX_COLUMNS} fields"
+			)));
+		}
+		if columns.iter().any(|c| c.len() > MAX_KEY) {
+			return Err(Error::Invalid("invalid field".into()));
+		}
+
+		Ok(columns)
+	}
+}
+
+#[derive(FromRow)]
+struct FieldRow {
+	field: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -538,29 +593,67 @@ impl Events {
 		})
 	}
 
-	/// The most frequent values of the data fields of a key
-	pub async fn values(
+	/// The keys grouped by the values of the chosen data fields, the most
+	/// frequent first
+	pub async fn events(
 		&self,
 		site_id: &UniqueId,
-		range: &Range,
-		key: &str,
-	) -> Result<Vec<ValueCount>> {
-		range.check()?;
+		query: &EventQuery,
+	) -> Result<EventTable> {
+		query.range.check()?;
+		let columns = query.columns()?;
 		let conn = self.db.get().await?;
+		let conn = conn.connection();
 
-		Ok(conn
-			.connection()
+		// $1 to $4 for the range, then the key, then the fields
+		let mut params: Vec<&(dyn ToSql + Sync)> =
+			vec![site_id, &query.range.from, &query.range.to, &self.timezone];
+		params.push(&query.key);
+		let values = if columns.is_empty() {
+			"'{}'::jsonb".to_string()
+		} else {
+			let pairs: Vec<String> = (0..columns.len())
+				.map(|i| format!("${n}::text, e.data -> ${n}::text", n = i + 6))
+				.collect();
+			format!("jsonb_build_object({})", pairs.join(", "))
+		};
+		for c in &columns {
+			params.push(c);
+		}
+
+		let rows: Vec<EventRow> = conn
 			.query(
 				&format!(
-					"SELECT f.field, f.value, count(*) AS count
-					FROM events e, jsonb_each_text(e.data) AS f(field, value)
-					WHERE e.site_id = $1 AND e.key = $5 AND {IN_RANGE}
-					GROUP BY 1, 2 ORDER BY count DESC, 1, 2
-					LIMIT 200"
+					"SELECT e.key, {values} AS values, count(*) AS count
+					FROM events e
+					WHERE e.site_id = $1 AND e.key IS NOT NULL
+						AND ($5::text IS NULL OR e.key = $5::text)
+						AND {IN_RANGE}
+					GROUP BY 1, 2 ORDER BY count DESC, 1
+					LIMIT {MAX_ROWS}"
 				),
-				&[site_id, &range.from, &range.to, &self.timezone, &key],
+				&params,
 			)
-			.await?)
+			.await?;
+
+		let fields: Vec<FieldRow> = conn
+			.query(
+				&format!(
+					"SELECT DISTINCT jsonb_object_keys(e.data) AS field
+					FROM events e
+					WHERE e.site_id = $1 AND e.data IS NOT NULL
+						AND ($5::text IS NULL OR e.key = $5::text)
+						AND {IN_RANGE}
+					ORDER BY 1"
+				),
+				&params[..5],
+			)
+			.await?;
+
+		Ok(EventTable {
+			fields: fields.into_iter().map(|f| f.field).collect(),
+			rows,
+		})
 	}
 }
 

@@ -11,8 +11,7 @@
 	import { createSite } from '@/api/sites';
 	import Button from '@/components/Button.svelte';
 	import Field from '@/components/Field.svelte';
-	import Sparkline from '@/components/Sparkline.svelte';
-	import { num } from '@/lib/format';
+	import SiteCard from '@/components/SiteCard.svelte';
 	import { getRouter, getSession } from '@/main';
 
 	const { sites }: { sites: SiteOverview[] } = $props();
@@ -20,8 +19,28 @@
 	const router = getRouter();
 	const user = getSession().user;
 
-	const sum = (s: SiteOverview, days: number) =>
-		s.days.slice(-days).reduce((acc, d) => acc + d.visitors, 0);
+	const visitors = (s: SiteOverview) =>
+		s.days.reduce((acc, d) => acc + d.visitors, 0);
+
+	let filter = $state('');
+	let sort: 'visitors' | 'name' = $state('visitors');
+
+	const shown = $derived(
+		sites
+			.filter(s => {
+				const f = filter.trim().toLowerCase();
+				return (
+					!f ||
+					s.name.toLowerCase().includes(f) ||
+					s.domain.includes(f)
+				);
+			})
+			.toSorted((a, b) =>
+				sort === 'name'
+					? a.name.localeCompare(b.name)
+					: visitors(b) - visitors(a),
+			),
+	);
 
 	let adding = $state(false);
 	let domain = $state('');
@@ -80,36 +99,35 @@
 			: 'You have no sites yet, ask an admin to give you some.'}
 	</p>
 {:else}
-	<div class="card">
-		<table class="list sites">
-			<thead>
-				<tr>
-					<th>Site</th>
-					<th class="spark">Visitors, 30 days</th>
-					<th class="right">Today</th>
-					<th class="right">7 days</th>
-					<th class="right">30 days</th>
-				</tr>
-			</thead>
-			<tbody>
-				{#each sites as site (site.id)}
-					<tr>
-						<td>
-							<a href="/sites/{site.id}" class="name">
-								{site.name}
-							</a>
-							<div class="muted domain">{site.domain}</div>
-						</td>
-						<td class="spark">
-							<Sparkline days={site.days} />
-						</td>
-						<td class="right num">{num(sum(site, 1))}</td>
-						<td class="right num">{num(sum(site, 7))}</td>
-						<td class="right num strong">{num(sum(site, 30))}</td>
-					</tr>
-				{/each}
-			</tbody>
-		</table>
+	<div class="tools">
+		<input
+			type="search"
+			placeholder="Filter sites"
+			aria-label="Filter sites"
+			bind:value={filter}
+			spellcheck="false"
+		/>
+		<div class="legend">
+			<span class="key visitors"></span>
+			Visitors
+			<span class="key pageviews"></span>
+			Pageviews, last 30 days
+		</div>
+		<label class="sort">
+			Sort by
+			<select bind:value={sort}>
+				<option value="visitors">visitors</option>
+				<option value="name">name</option>
+			</select>
+		</label>
+	</div>
+
+	<div class="grid">
+		{#each shown as site (site.id)}
+			<SiteCard {site} />
+		{:else}
+			<p class="muted">No site matches.</p>
+		{/each}
 	</div>
 {/if}
 
@@ -124,38 +142,51 @@
 		margin-bottom: 1.5rem;
 	}
 
-	.sites {
-		td {
-			padding-top: 0.7rem;
-			padding-bottom: 0.7rem;
-		}
+	.tools {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 1rem;
+		align-items: center;
+		justify-content: space-between;
+		margin-bottom: 1rem;
 
-		tr:last-child td {
-			border-bottom: none;
-		}
-	}
-
-	.name {
-		font-weight: 600;
-		color: var(--ink);
-		text-decoration: none;
-
-		&:hover {
-			text-decoration: underline;
+		input {
+			width: 16rem;
 		}
 	}
 
-	.domain {
+	.legend {
+		display: flex;
+		gap: 0.4rem;
+		align-items: center;
 		font-size: 0.85rem;
-	}
+		color: var(--ink-2);
 
-	.strong {
-		font-weight: 600;
-	}
+		.key {
+			width: 14px;
+			height: 0;
+			border-top: 2px solid var(--series-1);
 
-	@media (max-width: 700px) {
-		.spark {
-			display: none;
+			&.pageviews {
+				margin-left: 0.6rem;
+				border-top: 2px dashed var(--series-2);
+			}
 		}
+	}
+
+	.sort {
+		font-size: 0.85rem;
+		color: var(--ink-2);
+
+		select {
+			margin-left: 0.3rem;
+			padding: 0.25rem 0.4rem;
+		}
+	}
+
+	.grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr));
+		gap: 1rem;
 	}
 </style>
