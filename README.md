@@ -22,7 +22,10 @@ strichli('lookup_domain', { domain: 'example.com' });
 ```
 
 `sa_event` (Simple Analytics) is defined too, so existing calls keep
-working. Keys are `[A-Za-z0-9_.-]`, up to 64 characters, data is a flat
+working. strichli also answers Simple Analytics' paths `/latest.js` and
+`/noscript.gif` (a pageview without javascript, from the referer, never a
+visitor), so a custom Simple Analytics domain can point to strichli
+without changing the sites. Keys are `[A-Za-z0-9_.-]`, up to 64 characters, data is a flat
 object of strings, numbers and booleans (up to 1 KB).
 
 A pageview counts as a visitor when it starts a visit: the referrer is not

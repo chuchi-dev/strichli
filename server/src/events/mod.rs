@@ -160,6 +160,34 @@ fn check_data(data: Map<String, Value>) -> Result<Option<Value>> {
 	Ok(Some(data))
 }
 
+/// A pageview without javascript, from the url of the page (the referer of
+/// the noscript image). Returns the domain and the event. It can't tell
+/// whether it starts a visit, so it is no visitor.
+pub fn noscript_pageview(page_url: &str) -> Result<(String, NewEvent)> {
+	let rest = page_url
+		.split_once("://")
+		.map(|(_, rest)| rest)
+		.ok_or_else(|| Error::Invalid("invalid page url".into()))?;
+	let (host, path) = match rest.find(['/', '?', '#']) {
+		Some(i) => rest.split_at(i),
+		None => (rest, "/"),
+	};
+	let path = path
+		.split(['?', '#'])
+		.next()
+		.filter(|p| p.starts_with('/'))
+		.unwrap_or("/");
+
+	let event = NewEvent {
+		path: clean_path(path)?,
+		referrer: None,
+		is_unique: false,
+		key: None,
+		data: None,
+	};
+	Ok((normalize_domain(host)?, event))
+}
+
 /// The host of the referrer, none if there is none or it's the site itself
 fn external_referrer(referrer: Option<&str>, domain: &str) -> Option<String> {
 	let host = normalize_domain(referrer?).ok()?;
@@ -632,6 +660,22 @@ mod tests {
 		for v in bad {
 			assert!(payload(v).into_event("a.ch").is_err());
 		}
+	}
+
+	#[test]
+	fn noscript_pageviews() {
+		let (domain, ev) =
+			noscript_pageview("https://www.soerenmeier.ch/blog/?x=1#top")
+				.unwrap();
+		assert_eq!(domain, "soerenmeier.ch");
+		assert_eq!(ev.path, "/blog");
+		assert!(!ev.is_unique);
+
+		let (_, ev) = noscript_pageview("https://a.ch?x=1").unwrap();
+		assert_eq!(ev.path, "/");
+
+		assert!(noscript_pageview("").is_err());
+		assert!(noscript_pageview("https://localhost/").is_err());
 	}
 
 	#[test]
