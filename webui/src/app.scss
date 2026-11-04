@@ -39,7 +39,8 @@
 @mixin dark {
 	color-scheme: dark;
 	--plane: #16181b;
-	--plane-grid: rgba(255, 255, 255, 0.035);
+	// fainter than on paper, light lines stand out more on dark
+	--plane-grid: rgba(255, 255, 255, 0.014);
 	--surface: #1f2226;
 	--ink: #f1ede4;
 	--ink-2: #c4bfb3;
