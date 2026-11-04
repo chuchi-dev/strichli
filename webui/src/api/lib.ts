@@ -1,4 +1,4 @@
-import { getSession } from '@/lib/Session';
+import { session } from '@/lib/session.svelte';
 
 // in development the server runs separately (with cors enabled)
 const API_ADDR = import.meta.env.DEV ? 'http://localhost:8080/api/' : '/api/';
@@ -12,8 +12,7 @@ export async function request(
 		'content-type': 'application/json',
 	};
 
-	const token = getSession()?.token();
-	if (token) headers['session-token'] = token;
+	if (session.token) headers['session-token'] = session.token;
 
 	let resp: Response;
 	try {
@@ -33,6 +32,12 @@ export async function request(
 			err = new ApiError(obj.message, obj.error);
 		} catch (_e) {
 			err = new ApiError(resp.statusText);
+		}
+
+		// the session is gone, start over
+		if (err.type === 'INVALID_SESSION_TOKEN') {
+			session.logout();
+			window.location.href = '/login';
 		}
 
 		throw err;

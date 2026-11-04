@@ -1,13 +1,12 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import { getRouter, getSession } from '@/main';
+	import { current } from '@/lib/router.svelte';
+	import { session } from '@/lib/session.svelte';
 
 	const { children }: { children: Snippet } = $props();
 
-	const req = getRouter().currentRequest;
-	const user = getSession().user;
-
-	const path = $derived($req?.url.pathname ?? '/');
+	const path = $derived(current.path);
+	const user = $derived(session.user);
 	const active = (p: string) =>
 		p === '/' ? path === '/' || path.startsWith('/sites/') : path === p;
 </script>
@@ -24,16 +23,16 @@
 			<span class="name">strichli</span>
 		</a>
 
-		{#if $user}
+		{#if user}
 			<nav>
 				<a href="/" class:active={active('/')}>Sites</a>
-				{#if $user.admin}
+				{#if user.admin}
 					<a href="/users" class:active={active('/users')}>Users</a>
 					<a href="/tokens" class:active={active('/tokens')}>
 						API tokens
 					</a>
 				{/if}
-				<a href="/me" class:active={active('/me')}>{$user.name}</a>
+				<a href="/me" class:active={active('/me')}>{user.name}</a>
 			</nav>
 		{/if}
 	</div>

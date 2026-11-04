@@ -2,11 +2,22 @@
 	import { changePassword, logout } from '@/api/users';
 	import Button from '@/components/Button.svelte';
 	import Field from '@/components/Field.svelte';
-	import { getRouter, getSession } from '@/main';
+	import { go } from '@/lib/router.svelte';
+	import { session } from '@/lib/session.svelte';
+	import { getTheme, setTheme, type Theme } from '@/lib/theme';
 
-	const router = getRouter();
-	const session = getSession();
-	const user = session.user;
+	const THEMES: { id: Theme; label: string }[] = [
+		{ id: 'system', label: 'System' },
+		{ id: 'light', label: 'Light' },
+		{ id: 'dark', label: 'Dark' },
+	];
+
+	let theme = $state(getTheme());
+
+	function chooseTheme(t: Theme) {
+		theme = t;
+		setTheme(t);
+	}
 
 	let password = $state('');
 	let newPassword = $state('');
@@ -34,18 +45,32 @@
 		} catch (e) {
 			console.error('logout failed', e);
 		}
-		session.invalidate();
-		router.open('/login');
+		session.logout();
+		go('/login');
 	}
 </script>
 
-<h1>{$user?.name}</h1>
+<h1>{session.user?.name}</h1>
 
 <div class="card">
 	<p>
-		{$user?.email}
-		<span class="muted">{$user?.admin ? '(admin)' : ''}</span>
+		{session.user?.email}
+		<span class="muted">{session.user?.admin ? '(admin)' : ''}</span>
 	</p>
+
+	<h2 class="space">Theme</h2>
+	<div class="themes" role="group" aria-label="Theme">
+		{#each THEMES as t (t.id)}
+			<button
+				class:active={t.id === theme}
+				aria-pressed={t.id === theme}
+				onclick={() => chooseTheme(t.id)}
+			>
+				{t.label}
+			</button>
+		{/each}
+	</div>
+	<p class="hint">Saved in this browser.</p>
 
 	<h2 class="space">Change the password</h2>
 	<form class="form" onsubmit={submit}>
@@ -87,5 +112,41 @@
 
 	.ok {
 		color: var(--ok);
+	}
+
+	// like the presets of the range picker
+	.themes {
+		display: inline-flex;
+		margin-bottom: 0.4rem;
+		background-color: var(--surface);
+		border: 2px solid var(--border);
+		border-radius: var(--radius);
+		box-shadow: 3px 3px 0 var(--shadow);
+		overflow: hidden;
+
+		button {
+			padding: 0.35rem 0.9rem;
+			font-family: var(--mono);
+			font-size: 0.78rem;
+			font-weight: 600;
+			color: var(--ink-2);
+			background: none;
+			border: none;
+			cursor: pointer;
+
+			&:hover {
+				color: var(--ink);
+				background-color: var(--wash);
+			}
+
+			&.active {
+				color: var(--marker-ink);
+				background-color: var(--marker);
+			}
+
+			& + button {
+				border-left: 2px solid var(--border);
+			}
+		}
 	}
 </style>

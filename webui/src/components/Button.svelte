@@ -73,8 +73,9 @@
 	}
 
 	.primary {
-		color: var(--marker-ink);
-		background-color: var(--marker);
+		color: var(--button-ink);
+		background-color: var(--button);
+		border-color: var(--button-border);
 	}
 
 	.danger {

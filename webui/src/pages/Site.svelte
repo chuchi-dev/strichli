@@ -49,7 +49,8 @@
 	import Field from '@/components/Field.svelte';
 	import RangePicker from '@/components/RangePicker.svelte';
 	import { num } from '@/lib/format';
-	import { getRouter, getSession } from '@/main';
+	import { go } from '@/lib/router.svelte';
+	import { session } from '@/lib/session.svelte';
 
 	type Loaded = {
 		site: Site;
@@ -73,9 +74,6 @@
 		columns = [],
 		new: isNew,
 	}: Loaded = $props();
-
-	const router = getRouter();
-	const user = getSession().user;
 
 	$effect(() => {
 		document.title = `${site.name} - strichli`;
@@ -120,7 +118,7 @@
 
 		try {
 			await updateSite(site.id, domain, name);
-			router.open(link({}));
+			go(link({}));
 		} catch (e: any) {
 			settingsError = e.message;
 		}
@@ -134,7 +132,7 @@
 
 		try {
 			await deleteSite(site.id);
-			router.open('/');
+			go('/');
 		} catch (e: any) {
 			settingsError = e.message;
 		}
@@ -160,14 +158,14 @@
 		<RangePicker
 			range={current}
 			{preset}
-			onpreset={id => router.open(link({ range: id }))}
-			oncustom={r => router.open(link({ custom: r }))}
+			onpreset={id => go(link({ range: id }))}
+			oncustom={r => go(link({ custom: r }))}
 		/>
 	{/if}
 </div>
 
 <nav class="tabs">
-	{#each TABS.filter(t => !t.admin || $user?.admin) as t (t.id)}
+	{#each TABS.filter(t => !t.admin || session.user?.admin) as t (t.id)}
 		<a
 			href={link({ tab: t.id })}
 			class:active={t.id === tab}

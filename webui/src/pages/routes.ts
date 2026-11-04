@@ -1,10 +1,8 @@
-import NotFound from './NotFound.svelte';
-import Error from './Error.svelte';
-import type { Router } from '@/lib';
+import type { Request } from 'chuchi';
+import { router } from '@/lib/router.svelte';
 
-export { NotFound, Error };
-
-export function register(router: Router) {
+/** Every page. */
+export function registerRoutes() {
 	router.register('/', () => import('./Index.svelte'));
 	router.register(/^\/sites\/(?<id>[^/]+)$/, () => import('./Site.svelte'));
 	router.register('/login', () => import('./Login.svelte'));
@@ -12,4 +10,18 @@ export function register(router: Router) {
 	router.register('/users', () => import('./Users.svelte'));
 	router.register('/tokens', () => import('./Tokens.svelte'));
 	router.register('/me', () => import('./Me.svelte'));
+}
+
+const TITLES: Record<string, string> = {
+	'/login': 'Login',
+	'/password': 'Set the password',
+	'/users': 'Users',
+	'/tokens': 'API tokens',
+	'/me': 'Account',
+};
+
+/** pages with their own title (a site) set it themselves */
+export function pageTitle(req: Request): string {
+	const title = TITLES[req.pathname];
+	return title ? `${title} - strichli` : 'strichli';
 }

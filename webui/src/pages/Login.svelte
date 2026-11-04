@@ -1,10 +1,11 @@
 <script module lang="ts">
-	import type LoadProps from '@/lib/LoadProps';
+	import type { LoadProps } from '@/lib/router.svelte';
+	import { session } from '@/lib/session.svelte';
 
 	export const isPublic = true;
 
 	export async function loadProps(_props: object, lp: LoadProps) {
-		if (lp.session.isLoggedIn()) lp.setRedirect('/');
+		if (session.user) lp.setRedirect('/');
 	}
 </script>
 
@@ -12,10 +13,7 @@
 	import Button from '@/components/Button.svelte';
 	import Field from '@/components/Field.svelte';
 	import { login } from '@/api/users';
-	import { getRouter, getSession } from '@/main';
-
-	const router = getRouter();
-	const session = getSession();
+	import { go } from '@/lib/router.svelte';
 
 	let email = $state('');
 	let password = $state('');
@@ -28,8 +26,10 @@
 		busy = true;
 
 		try {
-			session.setAuthed(await login(email, password));
-			router.open('/');
+			session.login(await login(email, password));
+			// back to the page that asked for the login
+			const url = new URLSearchParams(location.search).get('url');
+			go(url?.startsWith('/') ? url : '/');
 		} catch (e: any) {
 			error = e.message;
 		} finally {

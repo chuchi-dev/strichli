@@ -16,7 +16,8 @@
 	import { setPasswordWithLink } from '@/api/users';
 	import Button from '@/components/Button.svelte';
 	import Field from '@/components/Field.svelte';
-	import { getRouter, getSession } from '@/main';
+	import { go } from '@/lib/router.svelte';
+	import { session } from '@/lib/session.svelte';
 
 	type Props = {
 		token?: string;
@@ -24,9 +25,6 @@
 	};
 
 	const { token = '', user }: Props = $props();
-
-	const router = getRouter();
-	const session = getSession();
 
 	let password = $state('');
 	let repeat = $state('');
@@ -43,8 +41,8 @@
 
 		busy = true;
 		try {
-			session.setAuthed(await setPasswordWithLink(token, password));
-			router.open('/');
+			session.login(await setPasswordWithLink(token, password));
+			go('/');
 		} catch (e: any) {
 			error = e.message;
 		} finally {

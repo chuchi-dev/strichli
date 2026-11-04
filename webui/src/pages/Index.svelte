@@ -12,12 +12,10 @@
 	import Button from '@/components/Button.svelte';
 	import Field from '@/components/Field.svelte';
 	import SiteCard from '@/components/SiteCard.svelte';
-	import { getRouter, getSession } from '@/main';
+	import { go } from '@/lib/router.svelte';
+	import { session } from '@/lib/session.svelte';
 
 	const { sites }: { sites: SiteOverview[] } = $props();
-
-	const router = getRouter();
-	const user = getSession().user;
 
 	const visitors = (s: SiteOverview) =>
 		s.days.reduce((acc, d) => acc + d.visitors, 0);
@@ -53,7 +51,7 @@
 
 		try {
 			const site = await createSite(domain, name || domain);
-			router.open(`/sites/${site.id}?new=1`);
+			go(`/sites/${site.id}?new=1`);
 		} catch (e: any) {
 			error = e.message;
 		}
@@ -62,7 +60,7 @@
 
 <div class="title">
 	<h1>Sites</h1>
-	{#if $user?.admin && !adding}
+	{#if session.user?.admin && !adding}
 		<Button onclick={() => (adding = true)}>Add site</Button>
 	{/if}
 </div>
@@ -94,7 +92,7 @@
 
 {#if !sites.length}
 	<p class="hint">
-		{$user?.admin
+		{session.user?.admin
 			? 'No sites yet, add the first one.'
 			: 'You have no sites yet, ask an admin to give you some.'}
 	</p>

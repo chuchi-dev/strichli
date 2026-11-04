@@ -15,7 +15,8 @@
 	import Button from '@/components/Button.svelte';
 	import Copy from '@/components/Copy.svelte';
 	import Field from '@/components/Field.svelte';
-	import { getRouter, getSession } from '@/main';
+	import { go } from '@/lib/router.svelte';
+	import { session } from '@/lib/session.svelte';
 
 	const {
 		users: loaded,
@@ -24,9 +25,6 @@
 
 	// svelte-ignore state_referenced_locally
 	const users = $state(loaded);
-
-	const router = getRouter();
-	const me = getSession().user;
 
 	/** the user in the form, null for a new one */
 	let editing: UserWithSites | null = $state(null);
@@ -82,7 +80,7 @@
 					return;
 				}
 			}
-			router.open('/users');
+			go('/users');
 		} catch (e: any) {
 			error = e.message;
 		}
@@ -93,7 +91,7 @@
 
 		try {
 			await deleteUser(user.id);
-			router.open('/users');
+			go('/users');
 		} catch (e: any) {
 			error = e.message;
 		}
@@ -127,7 +125,7 @@
 				<input
 					type="checkbox"
 					bind:checked={admin}
-					disabled={editing?.id === $me?.id}
+					disabled={editing?.id === session.user?.id}
 				/>
 				Admin: sees and manages every site, users and tokens
 			</label>
@@ -192,7 +190,7 @@
 							<Button kind="secondary" onclick={() => edit(user)}>
 								Edit
 							</Button>
-							{#if user.id !== $me?.id}
+							{#if user.id !== session.user?.id}
 								<Button
 									kind="danger"
 									onclick={() => remove(user)}

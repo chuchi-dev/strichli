@@ -18,6 +18,10 @@
 	--wash: rgba(22, 19, 15, 0.05);
 	--marker: #eb6834;
 	--marker-ink: #16130f;
+	// primary buttons: white on a deeper orange (4.7:1)
+	--button: #c94a1a;
+	--button-ink: #fff;
+	--button-border: #16130f;
 	--accent: #2a78d6;
 	--accent-ink: #1d5fae;
 	--danger: #c22f2e;
@@ -31,30 +35,42 @@
 	--mono: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
 }
 
+// the dark steps, chosen in the account or by the system
+@mixin dark {
+	color-scheme: dark;
+	--plane: #16181b;
+	--plane-grid: rgba(255, 255, 255, 0.035);
+	--surface: #1f2226;
+	--ink: #f1ede4;
+	--ink-2: #c4bfb3;
+	--muted: #8c877c;
+	--grid: #2e3238;
+	--axis: #454a52;
+	--border: #5b616b;
+	--hairline: rgba(255, 255, 255, 0.12);
+	--shadow: #000;
+	--wash: rgba(255, 255, 255, 0.05);
+	--marker: #e0652f;
+	--marker-ink: #16130f;
+	--button: #c94a1a;
+	--button-ink: #fff;
+	--button-border: #8f3210;
+	--accent: #3987e5;
+	--accent-ink: #8bbcf3;
+	--danger: #e66767;
+	--ok: #0ca30c;
+	--series-1: #3987e5;
+	--series-2: #e0652f;
+	--bar-tint: rgba(57, 135, 229, 0.24);
+}
+
+:root[data-theme='dark'] {
+	@include dark;
+}
+
 @media (prefers-color-scheme: dark) {
-	:root {
-		color-scheme: dark;
-		--plane: #16181b;
-		--plane-grid: rgba(255, 255, 255, 0.035);
-		--surface: #1f2226;
-		--ink: #f1ede4;
-		--ink-2: #c4bfb3;
-		--muted: #8c877c;
-		--grid: #2e3238;
-		--axis: #454a52;
-		--border: #5b616b;
-		--hairline: rgba(255, 255, 255, 0.12);
-		--shadow: #000;
-		--wash: rgba(255, 255, 255, 0.05);
-		--marker: #e0652f;
-		--marker-ink: #16130f;
-		--accent: #3987e5;
-		--accent-ink: #8bbcf3;
-		--danger: #e66767;
-		--ok: #0ca30c;
-		--series-1: #3987e5;
-		--series-2: #e0652f;
-		--bar-tint: rgba(57, 135, 229, 0.24);
+	:root:not([data-theme='light']) {
+		@include dark;
 	}
 }
 
