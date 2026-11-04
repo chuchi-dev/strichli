@@ -11,8 +11,7 @@ use crate::error::{Error, Result};
 use crate::limits::ClientIp;
 
 use super::{
-	ApiToken, Authed, AuthedSession, NO_PASSWORD, Session, User, Users,
-	hash_password,
+	ApiToken, Authed, NO_PASSWORD, User, Users, check_password, hash_password,
 };
 
 /// The page that sets the password with a link's token
@@ -20,10 +19,9 @@ pub fn password_url(public_addr: &str, token: &str) -> String {
 	format!("{public_addr}password?token={token}")
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct Authenticated {
-	session: Session,
+#[derive(Debug, Serialize)]
+struct LoginResp {
+	token: String,
 	user: User,
 }
 
@@ -33,45 +31,40 @@ struct LoginReq {
 	password: String,
 }
 
+/// Limited per client and, against many clients, per email
 async fn login(
 	State(state): State<AppState>,
 	ip: ClientIp,
 	Json(req): Json<LoginReq>,
-) -> Result<Json<Authenticated>> {
+) -> Result<Json<LoginResp>> {
 	state.login_limits.check(ip)?;
+	let email = req.email.trim().to_lowercase();
+	state.login_failures.check(&email)?;
 
-	let Some(user) = state.users.check_login(&req.email, req.password).await?
+	let Some(user) = state.users.check_login(&email, req.password).await?
 	else {
-		tracing::info!("failed login for {}", req.email.trim());
+		state.login_failures.failed(&email);
+		// the email stays out of the log, it might be a password
+		tracing::info!("failed login");
 		// slow down guessing
 		tokio::time::sleep(Duration::from_secs(1)).await;
 		return Err(Error::LoginIncorrect);
 	};
 
-	let session = state.users.new_session(&user.id).await?;
-	Ok(Json(Authenticated { session, user }))
+	state.login_failures.clear(&email);
+	let token = state.users.new_session(&user.id).await?;
+	Ok(Json(LoginResp { token, user }))
 }
 
-async fn token_auth(
-	State(users): State<Users>,
-	authed: Authed,
-) -> Result<Json<Authenticated>> {
-	let mut session = authed.session;
-	if session.should_renew() {
-		session = users.renew_session(session).await?;
-	}
-
-	Ok(Json(Authenticated {
-		session,
-		user: authed.user,
-	}))
+async fn me(authed: Authed) -> Json<User> {
+	Json(authed.user)
 }
 
 async fn logout(
 	State(users): State<Users>,
-	AuthedSession(session): AuthedSession,
+	authed: Authed,
 ) -> Result<Json<()>> {
-	users.delete_session(&session.token).await?;
+	users.delete_session(&authed.session.token_hash).await?;
 
 	Ok(Json(()))
 }
@@ -85,21 +78,28 @@ struct PasswordReq {
 
 /// Changes the own password, ends the other sessions
 async fn change_password(
-	State(users): State<Users>,
+	State(state): State<AppState>,
 	authed: Authed,
 	Json(req): Json<PasswordReq>,
 ) -> Result<Json<()>> {
-	if users
-		.check_login(&authed.user.email, req.password)
+	check_password(&req.new_password)?;
+	let email = &authed.user.email;
+	state.login_failures.check(email)?;
+
+	if state
+		.users
+		.check_login(email, req.password)
 		.await?
 		.is_none()
 	{
+		state.login_failures.failed(email);
 		return Err(Error::Invalid("the current password is wrong".into()));
 	}
 
 	let hash = hash_password(req.new_password).await?;
-	users
-		.set_password(&authed.user.id, &hash, Some(&authed.session.token))
+	state
+		.users
+		.set_password(&authed.user.id, &hash, Some(&authed.session.token_hash))
 		.await?;
 
 	Ok(Json(()))
@@ -148,18 +148,23 @@ async fn set_password(
 	State(state): State<AppState>,
 	ip: ClientIp,
 	Json(req): Json<SetPasswordReq>,
-) -> Result<Json<Authenticated>> {
+) -> Result<Json<LoginResp>> {
 	state.login_limits.check(ip)?;
+	check_password(&req.password)?;
 
+	// no bcrypt for links that don't work
+	if state.users.password_link_user(&req.token).await?.is_none() {
+		return Err(Error::NotFound);
+	}
 	let hash = hash_password(req.password).await?;
 	let user = state
 		.users
 		.use_password_link(&req.token, &hash)
 		.await?
 		.ok_or(Error::NotFound)?;
-	let session = state.users.new_session(&user.id).await?;
+	let token = state.users.new_session(&user.id).await?;
 
-	Ok(Json(Authenticated { session, user }))
+	Ok(Json(LoginResp { token, user }))
 }
 
 #[derive(Debug, Serialize)]
@@ -201,7 +206,7 @@ async fn list(
 struct UserReq {
 	email: String,
 	name: String,
-	/// required for a new user, else only set to change it
+	/// a new user without one sets it with a link, else only to change it
 	password: Option<String>,
 	admin: bool,
 	#[serde(default)]
@@ -215,22 +220,27 @@ async fn create(
 ) -> Result<Json<UserResp>> {
 	authed.user.require_admin()?;
 
-	// without a password the user sets it with a link
 	let hash = match req.password.filter(|p| !p.is_empty()) {
-		Some(p) => hash_password(p).await?,
-		None => NO_PASSWORD.into(),
+		Some(p) => Some(hash_password(p).await?),
+		None => None,
 	};
 	let user = state
 		.users
-		.create(&req.email, &req.name, &hash, req.admin)
+		.create(
+			&req.email,
+			&req.name,
+			hash.as_deref().unwrap_or(NO_PASSWORD),
+			req.admin,
+			&req.site_ids,
+		)
 		.await?;
-	state.sites.set_access(&user.id, &req.site_ids).await?;
 
-	let password_link = if hash == NO_PASSWORD {
-		let token = state.users.create_password_link(&user.id).await?;
-		Some(password_url(&state.cfg.public_addr, &token))
-	} else {
-		None
+	let password_link = match hash {
+		Some(_) => None,
+		None => {
+			let token = state.users.create_password_link(&user.id).await?;
+			Some(password_url(&state.cfg.public_addr, &token))
+		}
 	};
 
 	Ok(Json(UserResp {
@@ -257,13 +267,13 @@ async fn update(
 	};
 	let user = state
 		.users
-		.update(&id, &req.email, &req.name, req.admin)
+		.update(&id, &req.email, &req.name, req.admin, &req.site_ids)
 		.await?;
 	if let Some(hash) = hash {
-		let keep = (id == authed.user.id).then_some(&authed.session.token);
+		let keep = (id == authed.user.id)
+			.then_some(authed.session.token_hash.as_str());
 		state.users.set_password(&id, &hash, keep).await?;
 	}
-	state.sites.set_access(&id, &req.site_ids).await?;
 
 	Ok(Json(UserResp {
 		user,
@@ -334,16 +344,17 @@ async fn delete_token(
 
 pub fn routes() -> Router<AppState> {
 	Router::new()
-		.route("/users/login", post(login))
-		.route("/users/tokenauth", post(token_auth))
-		.route("/users/logout", post(logout))
-		.route("/users/password", post(change_password))
-		.route(
-			"/users/password-link",
-			get(password_link).post(set_password),
-		)
-		.route("/users", get(list).post(create))
-		.route("/users/{id}", put(update).delete(delete_user))
-		.route("/tokens", get(list_tokens).post(create_token))
-		.route("/tokens/{id}", delete(delete_token))
+		.route("/login", post(login))
+		.route("/me", get(me))
+		.route("/logout", post(logout))
+		.route("/password", post(change_password))
+		.route("/password-link", get(password_link).post(set_password))
+		.route("/", get(list).post(create))
+		.route("/{id}", put(update).delete(delete_user))
+}
+
+pub fn token_routes() -> Router<AppState> {
+	Router::new()
+		.route("/", get(list_tokens).post(create_token))
+		.route("/{id}", delete(delete_token))
 }

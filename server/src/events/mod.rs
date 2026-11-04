@@ -11,11 +11,14 @@ pub mod routes;
 
 use std::collections::HashMap;
 
+use chrono::{Datelike as _, NaiveDate, Utc};
+use chrono_tz::Tz;
 use pg::{Database, FromRow, UniqueId};
 use postgres_types::ToSql;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+use crate::db::migrate;
 use crate::error::{Error, Result};
 use crate::sites::normalize_domain;
 
@@ -214,18 +217,15 @@ impl Payload {
 			});
 		}
 
-		let referrer = external_referrer(self.r.as_deref(), domain);
-		let from_site = self
-			.r
-			.as_deref()
-			.and_then(|r| normalize_domain(r).ok())
-			.is_some_and(|host| host == domain);
+		let referrer_host =
+			self.r.as_deref().and_then(|r| normalize_domain(r).ok());
+		let from_site = referrer_host.as_deref() == Some(domain);
 		let revisit =
 			matches!(self.n.as_deref(), Some("reload" | "back_forward"));
 
 		Ok(NewEvent {
 			path,
-			referrer: referrer.filter(|_| !self.s),
+			referrer: referrer_host.filter(|_| !self.s && !from_site),
 			is_unique: !self.s && !from_site && !revisit,
 			key: None,
 			data: None,
@@ -233,46 +233,79 @@ impl Payload {
 	}
 }
 
-/// A range of days, `YYYY-MM-DD`, both included
-#[derive(Debug, Clone, Deserialize)]
+/// A range of days, `YYYY-MM-DD`, both included, checked by `RangeQuery`
+#[derive(Debug, Clone, Serialize)]
 pub struct Range {
 	pub from: String,
 	pub to: String,
 }
 
-fn check_date(date: &str) -> bool {
-	let parts: Vec<&str> = date.split('-').collect();
-	let [y, m, d] = parts.as_slice() else {
-		return false;
-	};
-	let num = |s: &str, len: usize| {
-		(s.len() == len && s.chars().all(|c| c.is_ascii_digit()))
-			.then(|| s.parse::<u32>().ok())
-			.flatten()
-	};
-
-	matches!(
-		(num(y, 4), num(m, 2), num(d, 2)),
-		(Some(_), Some(1..=12), Some(1..=31))
-	)
-}
-
 impl Range {
-	pub fn check(&self) -> Result<()> {
-		if !check_date(&self.from) || !check_date(&self.to) {
-			return Err(Error::Invalid("dates must be YYYY-MM-DD".into()));
-		}
-		// iso dates compare like strings
-		if self.from > self.to {
-			return Err(Error::Invalid("from is after to".into()));
-		}
-
-		Ok(())
-	}
-
 	/// a single day is shown in hours
 	fn hourly(&self) -> bool {
 		self.from == self.to
+	}
+}
+
+/// The days a request asks for: a preset (`range=7d`, counted back from
+/// today in the configured timezone) or `from` and `to`
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct RangeQuery {
+	#[serde(default)]
+	pub range: Option<String>,
+	#[serde(default)]
+	pub from: Option<String>,
+	#[serde(default)]
+	pub to: Option<String>,
+}
+
+/// How many days before today a preset starts
+const PRESETS: &[(&str, i64)] = &[
+	("today", 0),
+	("7d", 6),
+	("30d", 29),
+	("90d", 89),
+	("12m", 364),
+];
+
+/// a longer range would only be a lot of rows
+const MAX_RANGE_DAYS: i64 = 5 * 366;
+
+impl RangeQuery {
+	pub fn resolve(&self, today: NaiveDate) -> Result<Range> {
+		let invalid = |msg: &str| Error::Invalid(msg.into());
+		let date = |s: &str| {
+			NaiveDate::parse_from_str(s, "%Y-%m-%d")
+				.map_err(|_| invalid("dates must be valid YYYY-MM-DD"))
+		};
+
+		let (from, to) = match (&self.range, &self.from, &self.to) {
+			(_, Some(from), Some(to)) => (date(from)?, date(to)?),
+			(Some(range), None, None) => {
+				let days = PRESETS
+					.iter()
+					.find(|(id, _)| id == range)
+					.map(|(_, days)| *days)
+					.ok_or_else(|| invalid("unknown range"))?;
+				(today - chrono::Days::new(days as u64), today)
+			}
+			_ => return Err(invalid("a range or from and to are missing")),
+		};
+
+		if from > to {
+			return Err(invalid("from is after to"));
+		}
+		if from.year() < 2000 || to.year() > 2100 {
+			return Err(invalid("the dates must be between 2000 and 2100"));
+		}
+		if (to - from).num_days() > MAX_RANGE_DAYS {
+			return Err(invalid("the range can be at most 5 years"));
+		}
+
+		Ok(Range {
+			from: from.format("%Y-%m-%d").to_string(),
+			to: to.format("%Y-%m-%d").to_string(),
+		})
 	}
 }
 
@@ -326,6 +359,7 @@ pub struct EventRow {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EventTable {
+	pub range: Range,
 	/// the data fields of the keys in the range, to choose columns from
 	pub fields: Vec<String>,
 	pub rows: Vec<EventRow>,
@@ -335,7 +369,7 @@ pub struct EventTable {
 #[derive(Debug, Clone, Deserialize)]
 pub struct EventQuery {
 	#[serde(flatten)]
-	pub range: Range,
+	pub range: RangeQuery,
 	/// data fields to group by, comma separated
 	#[serde(default)]
 	pub fields: String,
@@ -391,6 +425,7 @@ struct FieldRow {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Stats {
+	pub range: Range,
 	pub visitors: i64,
 	pub pageviews: i64,
 	pub hourly: bool,
@@ -402,7 +437,7 @@ pub struct Stats {
 
 #[derive(FromRow)]
 struct SiteBucket {
-	site_id: String,
+	site_id: UniqueId,
 	date: String,
 	visitors: i64,
 	pageviews: i64,
@@ -411,29 +446,37 @@ struct SiteBucket {
 #[derive(Clone)]
 pub struct Events {
 	db: Database,
+	/// for postgres
 	timezone: String,
+	tz: Tz,
 }
 
+/// at most this many keys or fields are listed, visitors can send any
+const MAX_KEYS: usize = 100;
+
 impl Events {
+	/// Today in the configured timezone
+	pub fn today(&self) -> NaiveDate {
+		Utc::now().with_timezone(&self.tz).date_naive()
+	}
+
 	pub async fn new(db: &Database, timezone: &str) -> Self {
-		let migrations = db.migrations();
-		let mut conn = db.get().await.unwrap();
+		migrate(db, MIGRATIONS).await;
 
-		for (name, sql) in MIGRATIONS {
-			migrations
-				.add(&mut conn, name, sql)
-				.await
-				.expect("failed to run migration");
-		}
-
-		conn.connection()
+		// postgres and chrono-tz both know the iana names
+		let tz: Tz = timezone.parse().expect("unknown timezone in config.toml");
+		db.get()
+			.await
+			.expect("no database connection")
+			.connection()
 			.execute("SELECT now() AT TIME ZONE $1::text", &[&timezone])
 			.await
-			.expect("unknown timezone in config.toml");
+			.expect("postgres doesn't know the timezone in config.toml");
 
 		Self {
 			db: db.clone(),
 			timezone: timezone.into(),
+			tz,
 		}
 	}
 
@@ -467,7 +510,7 @@ impl Events {
 	pub async fn last_30_days(
 		&self,
 		site_ids: &[UniqueId],
-	) -> Result<HashMap<String, Vec<Bucket>>> {
+	) -> Result<HashMap<UniqueId, Vec<Bucket>>> {
 		let ids: Vec<String> =
 			site_ids.iter().map(|id| id.to_string()).collect();
 		let conn = self.db.get().await?;
@@ -505,7 +548,7 @@ impl Events {
 			)
 			.await?;
 
-		let mut days: HashMap<String, Vec<Bucket>> = HashMap::new();
+		let mut days: HashMap<UniqueId, Vec<Bucket>> = HashMap::new();
 		for row in rows {
 			days.entry(row.site_id).or_default().push(Bucket {
 				date: row.date,
@@ -520,9 +563,9 @@ impl Events {
 	pub async fn stats(
 		&self,
 		site_id: &UniqueId,
-		range: &Range,
+		query: &RangeQuery,
 	) -> Result<Stats> {
-		range.check()?;
+		let range = query.resolve(self.today())?;
 		let conn = self.db.get().await?;
 		let conn = conn.connection();
 		let params: [&(dyn ToSql + Sync); 4] =
@@ -593,16 +636,18 @@ impl Events {
 				&format!(
 					"SELECT e.key, count(*) AS count FROM events e
 					WHERE e.site_id = $1 AND e.key IS NOT NULL AND {IN_RANGE}
-					GROUP BY e.key ORDER BY count DESC, e.key"
+					GROUP BY e.key ORDER BY count DESC, e.key
+					LIMIT {MAX_KEYS}"
 				),
 				&params,
 			)
 			.await?;
 
 		Ok(Stats {
+			hourly: range.hourly(),
+			range,
 			visitors: buckets.iter().map(|b| b.visitors).sum(),
 			pageviews: buckets.iter().map(|b| b.pageviews).sum(),
-			hourly: range.hourly(),
 			buckets,
 			pages,
 			referrers,
@@ -686,14 +731,14 @@ impl Events {
 		site_id: &UniqueId,
 		query: &EventQuery,
 	) -> Result<EventTable> {
-		query.range.check()?;
+		let range = query.range.resolve(self.today())?;
 		let columns = query.columns()?;
 		let conn = self.db.get().await?;
 		let conn = conn.connection();
 
 		// $1 to $4 for the range, then the key, then the fields
 		let mut params: Vec<&(dyn ToSql + Sync)> =
-			vec![site_id, &query.range.from, &query.range.to, &self.timezone];
+			vec![site_id, &range.from, &range.to, &self.timezone];
 		params.push(&query.key);
 		let values = if columns.is_empty() {
 			"'{}'::jsonb".to_string()
@@ -730,13 +775,15 @@ impl Events {
 					WHERE e.site_id = $1 AND e.data IS NOT NULL
 						AND ($5::text IS NULL OR e.key = $5::text)
 						AND {IN_RANGE}
-					ORDER BY 1"
+					ORDER BY 1
+					LIMIT {MAX_KEYS}"
 				),
 				&params[..5],
 			)
 			.await?;
 
 		Ok(EventTable {
+			range,
 			fields: fields.into_iter().map(|f| f.field).collect(),
 			rows,
 		})
@@ -858,17 +905,33 @@ mod tests {
 	}
 
 	#[test]
-	fn checks_ranges() {
-		let range = |from: &str, to: &str| Range {
-			from: from.into(),
-			to: to.into(),
+	fn resolves_ranges() {
+		let today = NaiveDate::from_ymd_opt(2026, 11, 4).unwrap();
+		let q = |range: Option<&str>, from: Option<&str>, to: Option<&str>| {
+			RangeQuery {
+				range: range.map(Into::into),
+				from: from.map(Into::into),
+				to: to.map(Into::into),
+			}
+			.resolve(today)
 		};
 
-		assert!(range("2026-11-01", "2026-11-04").check().is_ok());
-		assert!(range("2026-11-04", "2026-11-04").hourly());
-		assert!(range("2026-11-05", "2026-11-04").check().is_err());
-		assert!(range("2026-13-01", "2026-13-02").check().is_err());
-		assert!(range("26-11-01", "2026-11-02").check().is_err());
-		assert!(range("2026-11-01'", "2026-11-02").check().is_err());
+		let week = q(Some("7d"), None, None).unwrap();
+		assert_eq!(
+			(week.from.as_str(), week.to.as_str()),
+			("2026-10-29", "2026-11-04")
+		);
+		let day = q(Some("today"), None, None).unwrap();
+		assert!(day.hourly());
+		let custom = q(None, Some("2026-10-01"), Some("2026-10-31")).unwrap();
+		assert_eq!(custom.to, "2026-10-31");
+
+		assert!(q(Some("1000y"), None, None).is_err());
+		assert!(q(None, None, None).is_err());
+		assert!(q(None, Some("2026-11-05"), Some("2026-11-04")).is_err());
+		assert!(q(None, Some("2026-02-31"), Some("2026-03-01")).is_err());
+		assert!(q(None, Some("26-11-01"), Some("2026-11-02")).is_err());
+		assert!(q(None, Some("1990-01-01"), Some("1990-02-01")).is_err());
+		assert!(q(None, Some("2001-01-01"), Some("2026-01-01")).is_err());
 	}
 }

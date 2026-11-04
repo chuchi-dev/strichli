@@ -9,6 +9,7 @@ use pg::time::DateTime;
 use pg::{Database, FromRow, UniqueId};
 use serde::Serialize;
 
+use crate::db::{IdRow, migrate};
 use crate::error::{Error, Result};
 use crate::users::User;
 
@@ -63,6 +64,8 @@ fn check_name(name: &str) -> Result<String> {
 	Ok(name.into())
 }
 
+const SITE_COLUMNS: &str = "s.id, s.domain, s.name, s.created_on";
+
 #[derive(Clone)]
 pub struct Sites {
 	db: Database,
@@ -70,15 +73,7 @@ pub struct Sites {
 
 impl Sites {
 	pub async fn new(db: &Database) -> Self {
-		let migrations = db.migrations();
-		let mut conn = db.get().await.unwrap();
-
-		for (name, sql) in MIGRATIONS {
-			migrations
-				.add(&mut conn, name, sql)
-				.await
-				.expect("failed to run migration");
-		}
+		migrate(db, MIGRATIONS).await;
 
 		Self { db: db.clone() }
 	}
@@ -86,26 +81,21 @@ impl Sites {
 	/// Every site for admins, else the ones the user was given
 	pub async fn list(&self, user: &User) -> Result<Vec<Site>> {
 		let conn = self.db.get().await?;
-		let conn = conn.connection();
 
-		let sites = if user.admin {
-			conn.query(
-				"SELECT id, domain, name, created_on FROM sites
-				ORDER BY name",
-				&[],
+		Ok(conn
+			.connection()
+			.query(
+				&format!(
+					"SELECT {SITE_COLUMNS} FROM sites s
+					WHERE $1 OR EXISTS (
+						SELECT 1 FROM site_users u
+						WHERE u.site_id = s.id AND u.user_id = $2
+					)
+					ORDER BY s.name"
+				),
+				&[&user.admin, &user.id],
 			)
-			.await?
-		} else {
-			conn.query(
-				"SELECT s.id, s.domain, s.name, s.created_on FROM sites s
-				JOIN site_users u ON u.site_id = s.id
-				WHERE u.user_id = $1 ORDER BY s.name",
-				&[&user.id],
-			)
-			.await?
-		};
-
-		Ok(sites)
+			.await?)
 	}
 
 	/// The site if the user may see it
@@ -115,11 +105,13 @@ impl Sites {
 		let site: Option<Site> = conn
 			.connection()
 			.query_opt(
-				"SELECT s.id, s.domain, s.name, s.created_on FROM sites s
-				WHERE s.id = $1 AND ($2 OR EXISTS (
-					SELECT 1 FROM site_users u
-					WHERE u.site_id = s.id AND u.user_id = $3
-				))",
+				&format!(
+					"SELECT {SITE_COLUMNS} FROM sites s
+					WHERE s.id = $1 AND ($2 OR EXISTS (
+						SELECT 1 FROM site_users u
+						WHERE u.site_id = s.id AND u.user_id = $3
+					))"
+				),
 				&[id, &user.admin, &user.id],
 			)
 			.await?;
@@ -127,11 +119,8 @@ impl Sites {
 		site.ok_or(Error::NotFound)
 	}
 
-	/// The site of a host the tracking script runs on
-	pub async fn by_host(&self, host: &str) -> Result<Option<UniqueId>> {
-		let Ok(domain) = normalize_domain(host) else {
-			return Ok(None);
-		};
+	/// The site of a domain from `normalize_domain`
+	pub async fn by_domain(&self, domain: &str) -> Result<Option<UniqueId>> {
 		let conn = self.db.get().await?;
 
 		let row: Option<IdRow> = conn
@@ -151,20 +140,13 @@ impl Sites {
 		};
 		let conn = self.db.get().await?;
 
-		let inserted = conn
-			.connection()
+		conn.connection()
 			.execute(
 				"INSERT INTO sites (id, domain, name, created_on)
-				VALUES ($1, $2, $3, $4) ON CONFLICT (domain) DO NOTHING",
+				VALUES ($1, $2, $3, $4)",
 				&[&site.id, &site.domain, &site.name, &site.created_on],
 			)
 			.await?;
-		if inserted == 0 {
-			return Err(Error::Conflict(format!(
-				"the site {} already exists",
-				site.domain
-			)));
-		}
 
 		tracing::info!("created the site {} {}", site.domain, site.id);
 		Ok(site)
@@ -179,27 +161,17 @@ impl Sites {
 		let domain = normalize_domain(domain)?;
 		let name = check_name(name)?;
 		let conn = self.db.get().await?;
-		let conn = conn.connection();
 
-		let taken: Option<IdRow> = conn
+		conn.connection()
 			.query_opt(
-				"SELECT id FROM sites WHERE domain = $1 AND id <> $2",
-				&[&domain, id],
+				&format!(
+					"UPDATE sites s SET domain = $2, name = $3 WHERE s.id = $1
+					RETURNING {SITE_COLUMNS}"
+				),
+				&[id, &domain, &name],
 			)
-			.await?;
-		if taken.is_some() {
-			return Err(Error::Conflict(format!(
-				"the site {domain} already exists"
-			)));
-		}
-
-		conn.query_opt(
-			"UPDATE sites SET domain = $2, name = $3 WHERE id = $1
-			RETURNING id, domain, name, created_on",
-			&[id, &domain, &name],
-		)
-		.await?
-		.ok_or(Error::NotFound)
+			.await?
+			.ok_or(Error::NotFound)
 	}
 
 	/// Its events go with it
@@ -233,36 +205,6 @@ impl Sites {
 
 		Ok(access)
 	}
-
-	/// Replaces the sites a user was given
-	pub async fn set_access(
-		&self,
-		user_id: &UniqueId,
-		site_ids: &[UniqueId],
-	) -> Result<()> {
-		let mut conn = self.db.get().await?;
-		let trans = conn.transaction().await?;
-		let conn = trans.connection();
-
-		conn.execute("DELETE FROM site_users WHERE user_id = $1", &[user_id])
-			.await?;
-		for site_id in site_ids {
-			conn.execute(
-				"INSERT INTO site_users (site_id, user_id)
-				SELECT id, $2 FROM sites WHERE id = $1",
-				&[site_id, user_id],
-			)
-			.await?;
-		}
-
-		trans.commit().await?;
-		Ok(())
-	}
-}
-
-#[derive(FromRow)]
-struct IdRow {
-	id: UniqueId,
 }
 
 #[derive(FromRow)]

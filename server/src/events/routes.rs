@@ -59,7 +59,13 @@ async fn collect(
 		return Err(Error::Invalid("the origin is not the host".into()));
 	}
 
-	let site_id = state.sites.by_host(&domain).await?.ok_or(Error::NotFound)?;
+	let site_id = state
+		.sites
+		.by_domain(&domain)
+		.await?
+		.ok_or(Error::NotFound)?;
+	// many addresses can't flood one site either
+	state.site_limits.check(site_id)?;
 	let event = payload.into_event(&domain)?;
 	state.events.insert(&site_id, &event).await?;
 
@@ -101,7 +107,12 @@ async fn noscript_inner(
 	let page = header(header::REFERER)
 		.ok_or_else(|| Error::Invalid("no referer".into()))?;
 	let (domain, event) = noscript_pageview(page)?;
-	let site_id = state.sites.by_host(&domain).await?.ok_or(Error::NotFound)?;
+	let site_id = state
+		.sites
+		.by_domain(&domain)
+		.await?
+		.ok_or(Error::NotFound)?;
+	state.site_limits.check(site_id)?;
 
 	state.events.insert(&site_id, &event).await
 }

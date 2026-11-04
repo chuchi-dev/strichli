@@ -42,8 +42,10 @@ sites routes, send it as `authorization: Bearer <token>`.
 - `POST /api/sites` `{ "domain", "name" }` adds a site, the response has
   the `snippet`
 - `PUT /api/sites/{id}` `{ "domain", "name" }`
-- `GET /api/sites/{id}/stats?from=YYYY-MM-DD&to=YYYY-MM-DD`
-- `GET /api/sites/{id}/events?from=…&to=…&fields=domain,plan[&key=…]` the
+- `GET /api/sites/{id}/stats?range=7d` or `?from=YYYY-MM-DD&to=YYYY-MM-DD`:
+  presets `today`, `7d`, `30d`, `90d`, `12m` count back from today in the
+  configured timezone, at most 5 years; the answer has the `range` it shows
+- `GET /api/sites/{id}/events?range=…&fields=domain,plan[&key=…]` the
   events grouped by key and the values of up to 5 data fields, with the
   fields there are
 
@@ -82,8 +84,8 @@ cargo run
 cargo run -- add-user --email you@example.com --name You --admin
 ```
 
-In debug builds cors is enabled and `../webui/dist` is served. The dev
-webui talks to `http://localhost:8080/api/`.
+In debug builds `../webui/dist` is served. The vite dev server passes
+`/api` on to `http://127.0.0.1:8080`.
 
 Formatting: `cargo fmt`, `npm run format`, checks: `cargo clippy`,
 `cargo test`, `npm run check`.
@@ -107,7 +109,23 @@ password = ""
 ```
 
 The server listens on `HOST`:`PORT` (default `127.0.0.1:8080`) and takes the
-client ip for the rate limits from the last `x-forwarded-for` entry.
+client ip for the rate limits from the last `x-forwarded-for` entry (an
+IPv6 client counts as its /64), so it must only be reachable through the
+proxy.
+
+## Privacy and security
+
+- No cookies, nothing in the browser's storage. The database has no ip,
+  user agent or visitor id; the ip only counts against in-memory limits.
+- The proxy's access log still sees ip, user agent and referer of `/e`,
+  `/s.js` and `/noscript.gif`; turn it off for them if that matters.
+- Session tokens, api tokens and password links are 32 random bytes, only
+  their sha256 is stored. Sessions end 30 days after the last use, at the
+  latest a year after the login.
+- Logins are limited per client and, after 10 failures in 15 minutes, per
+  email. Events are limited per client and per site.
+- Anyone can send events for a site (that is how the tracking works),
+  the limits and the size checks keep it bounded.
 
 ## License
 

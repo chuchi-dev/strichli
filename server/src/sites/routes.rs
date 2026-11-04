@@ -10,7 +10,7 @@ use crate::AppState;
 use crate::error::{Error, Result};
 use crate::events::import::{SIMPLE_ANALYTICS, parse_line};
 use crate::events::{
-	Bucket, EventQuery, EventTable, ImportResult, Range, Stats,
+	Bucket, EventQuery, EventTable, ImportResult, RangeQuery, Stats,
 };
 use crate::users::Caller;
 
@@ -55,7 +55,7 @@ async fn list(
 	let overview = sites
 		.into_iter()
 		.map(|site| SiteOverview {
-			days: days.remove(&site.id.to_string()).unwrap_or_default(),
+			days: days.remove(&site.id).unwrap_or_default(),
 			site: site_resp(&state, site),
 		})
 		.collect();
@@ -122,7 +122,7 @@ async fn stats(
 	State(state): State<AppState>,
 	caller: Caller,
 	Path(id): Path<UniqueId>,
-	Query(range): Query<Range>,
+	Query(range): Query<RangeQuery>,
 ) -> Result<Json<Stats>> {
 	let site = state.sites.get(&caller.user, &id).await?;
 

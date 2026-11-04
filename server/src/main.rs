@@ -1,3 +1,4 @@
+mod db;
 mod error;
 mod events;
 mod headers;
@@ -11,21 +12,19 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::extract::FromRef;
-use axum::http::{Method, header};
 use axum::middleware::map_response_with_state;
 use clap::{Parser, Subcommand};
-use pg::Database;
+use pg::{Database, UniqueId};
 use serde::Deserialize;
 use tokio::net::TcpListener;
 use tokio::signal;
 use tower_http::compression::CompressionLayer;
-use tower_http::cors::{self, CorsLayer};
 use tower_http::trace::TraceLayer;
 
 use crate::error::Error;
 use crate::events::Events;
 use crate::headers::SecurityHeaders;
-use crate::limits::{Allowed, Limits};
+use crate::limits::{Allowed, ClientIp, Failures, Limits};
 use crate::sites::Sites;
 use crate::users::routes::password_url;
 use crate::users::{NO_PASSWORD, Users};
@@ -44,8 +43,6 @@ struct Args {
 	port: u16,
 	#[arg(long, default_value_t = default_dist_dir())]
 	dist_dir: String,
-	#[arg(long)]
-	enable_cors: bool,
 	/// Without a command the server runs
 	#[command(subcommand)]
 	cmd: Option<Cmd>,
@@ -114,10 +111,14 @@ pub struct AppState {
 	users: Users,
 	sites: Sites,
 	events: Events,
-	/// events per ip
-	collect_limits: Limits,
-	/// login attempts per ip
-	login_limits: Limits,
+	/// events per client
+	collect_limits: Limits<ClientIp>,
+	/// events per site, against many clients
+	site_limits: Limits<UniqueId>,
+	/// login attempts per client
+	login_limits: Limits<ClientIp>,
+	/// failed logins per email
+	login_failures: Failures,
 	webui: Webui,
 }
 
@@ -133,12 +134,13 @@ impl FromRef<AppState> for Webui {
 	}
 }
 
-fn create_app(state: AppState, enable_cors: bool) -> Router {
+fn create_app(state: AppState) -> Router {
 	let api = Router::new()
-		.merge(users::routes::routes())
+		.nest("/users", users::routes::routes())
+		.nest("/tokens", users::routes::token_routes())
 		.nest("/sites", sites::routes::routes());
 
-	let mut app = Router::new()
+	Router::new()
 		.nest("/api", api)
 		.merge(events::routes::routes())
 		.merge(webui::routes())
@@ -147,28 +149,8 @@ fn create_app(state: AppState, enable_cors: bool) -> Router {
 			headers::security_headers,
 		))
 		.layer(CompressionLayer::new())
-		.layer(TraceLayer::new_for_http());
-
-	if enable_cors {
-		app = app.layer(
-			CorsLayer::new()
-				.allow_origin(cors::Any)
-				.allow_methods([
-					Method::GET,
-					Method::POST,
-					Method::PUT,
-					Method::DELETE,
-					Method::OPTIONS,
-				])
-				.allow_headers([
-					header::CONTENT_TYPE,
-					header::AUTHORIZATION,
-					"session-token".parse().unwrap(),
-				]),
-		);
-	}
-
-	app.with_state(state)
+		.layer(TraceLayer::new_for_http())
+		.with_state(state)
 }
 
 #[tokio::main]
@@ -212,10 +194,15 @@ async fn main() {
 		second: 10,
 		minute: 120,
 	});
+	let site_limits = Limits::new(Allowed {
+		second: 50,
+		minute: 1500,
+	});
 	let login_limits = Limits::new(Allowed {
 		second: 1,
 		minute: 10,
 	});
+	let login_failures = Failures::default();
 
 	let state = AppState {
 		cfg,
@@ -223,14 +210,18 @@ async fn main() {
 		sites,
 		events,
 		collect_limits: collect_limits.clone(),
+		site_limits: site_limits.clone(),
 		login_limits: login_limits.clone(),
+		login_failures: login_failures.clone(),
 		webui: Webui::new(&args.dist_dir),
 	};
 
 	collect_limits.cleanup_task();
+	site_limits.cleanup_task();
 	login_limits.cleanup_task();
+	login_failures.cleanup_task();
 
-	let app = create_app(state, args.enable_cors || cfg!(debug_assertions));
+	let app = create_app(state);
 
 	let listen = format!("{}:{}", args.host, args.port);
 	let listener = TcpListener::bind(&listen)
@@ -248,7 +239,8 @@ async fn main() {
 async fn run_cmd(cmd: Cmd, users: &Users, cfg: &Config) -> error::Result<()> {
 	let user = match cmd {
 		Cmd::AddUser { email, name, admin } => {
-			let user = users.create(&email, &name, NO_PASSWORD, admin).await?;
+			let user =
+				users.create(&email, &name, NO_PASSWORD, admin, &[]).await?;
 			println!("added {} ({})", user.email, user.id);
 			user
 		}

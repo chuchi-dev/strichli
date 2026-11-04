@@ -52,8 +52,16 @@ struct ErrorResponse {
 
 impl IntoResponse for Error {
 	fn into_response(self) -> Response {
-		let status = self.status_code();
-		let retry_after = match &self {
+		// the details of an internal error stay in the log
+		let this = match self {
+			Self::Internal(detail) => {
+				tracing::error!("internal error: {detail}");
+				Self::Internal("see the server log".into())
+			}
+			other => other,
+		};
+		let status = this.status_code();
+		let retry_after = match &this {
 			Self::LimitReached(secs) => Some(*secs),
 			_ => None,
 		};
@@ -61,8 +69,8 @@ impl IntoResponse for Error {
 		let mut resp = (
 			status,
 			Json(ErrorResponse {
-				message: self.to_string(),
-				error: self,
+				message: this.to_string(),
+				error: this,
 			}),
 		)
 			.into_response();
@@ -78,7 +86,18 @@ impl IntoResponse for Error {
 
 impl From<pg::Error> for Error {
 	fn from(e: pg::Error) -> Self {
-		Self::Internal(e.to_string())
+		match e {
+			// a taken email or domain
+			pg::Error::UniqueViolation { constraint, .. } => Self::Conflict(
+				match constraint.as_deref() {
+					Some("email_unique") => "this email already has an account",
+					Some("domain_unique") => "this site already exists",
+					_ => "this already exists",
+				}
+				.into(),
+			),
+			e => Self::Internal(e.to_string()),
+		}
 	}
 }
 

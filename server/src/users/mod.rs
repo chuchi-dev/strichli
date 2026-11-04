@@ -1,6 +1,9 @@
 //! Users log in with email and password. Admins see and manage every site,
 //! other users only the sites they were given. API tokens (for scripts and
 //! AI agents) act as the admin who created them, only on the sites routes.
+//!
+//! Session tokens, api tokens and password links are 32 random bytes, only
+//! their sha256 is stored.
 
 pub mod routes;
 
@@ -13,7 +16,9 @@ use pg::time::{DateTime, Timeout};
 use pg::{Database, FromRow, UniqueId};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
+use tokio::sync::Semaphore;
 
+use crate::db::{IdRow, migrate};
 use crate::error::{Error, Result};
 
 pub type Token = crypto::token::Token<32>;
@@ -27,12 +32,18 @@ const MIGRATIONS: &[(&str, &str)] = &[
 		"create-password-links",
 		include_str!("./migrations/create-password-links.sql"),
 	),
+	(
+		"hash-sessions",
+		include_str!("./migrations/hash-sessions.sql"),
+	),
 ];
 
-/// 30 days
+/// A session ends 30 days after its last use
 const SESSION_TIMEOUT: Duration = Duration::from_secs(30 * 24 * 60 * 60);
-/// renew the session once less than 10 days are remaining
-const RENEW_AFTER: Duration = Duration::from_secs(10 * 24 * 60 * 60);
+/// the timeout moves on at most once an hour, most requests only read
+const SESSION_EXTEND_AFTER: Duration = Duration::from_secs(60 * 60);
+/// and at the latest a year after the login
+const SESSION_MAX_AGE: Duration = Duration::from_secs(365 * 24 * 60 * 60);
 /// 7 days
 const PASSWORD_LINK_TIMEOUT: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
@@ -40,9 +51,14 @@ const PASSWORD_LINK_TIMEOUT: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 /// password matches it
 pub const NO_PASSWORD: &str = "!";
 
-/// compared against for unknown emails, a login takes as long either way
+/// compared against for unknown emails and users without a password, a
+/// login takes as long either way
 static DUMMY_HASH: LazyLock<String> =
 	LazyLock::new(|| bcrypt::hash("strichli", bcrypt::DEFAULT_COST).unwrap());
+
+/// bcrypt takes a quarter of a second of a core, at most this many run at
+/// once so logins can't take all of them
+static BCRYPT: Semaphore = Semaphore::const_new(2);
 
 #[derive(Debug, Clone, Serialize, FromRow)]
 #[serde(rename_all = "camelCase")]
@@ -66,21 +82,28 @@ impl User {
 	}
 }
 
-#[derive(Debug, Clone, Serialize, FromRow)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, FromRow)]
 pub struct Session {
-	pub token: Token,
+	pub token_hash: String,
 	pub timeout: Timeout,
-	#[serde(skip)]
 	pub user_id: UniqueId,
+	pub created_on: DateTime,
 }
 
 impl Session {
-	fn should_renew(&self) -> bool {
+	fn is_valid(&self) -> bool {
+		let too_old = self
+			.created_on
+			.abs_diff(&DateTime::now())
+			.is_some_and(|age| age > SESSION_MAX_AGE);
+
+		!self.timeout.has_elapsed() && !too_old
+	}
+
+	fn should_extend(&self) -> bool {
 		self.timeout
 			.remaining()
-			.map(|d| d < RENEW_AFTER)
-			.unwrap_or(true)
+			.is_none_or(|d| d < SESSION_TIMEOUT - SESSION_EXTEND_AFTER)
 	}
 }
 
@@ -111,23 +134,47 @@ pub fn normalize(email: &str, name: &str) -> Result<(String, String)> {
 	Ok((email, name.into()))
 }
 
-/// bcrypt takes a quarter of a second, so it runs on a blocking thread
-pub async fn hash_password(password: String) -> Result<String> {
+/// Runs bcrypt on a blocking thread, a few at once
+async fn bcrypt_blocking<T, F>(f: F) -> Result<T>
+where
+	F: FnOnce() -> T + Send + 'static,
+	T: Send + 'static,
+{
+	let _permit = BCRYPT
+		.acquire()
+		.await
+		.map_err(|e| Error::Internal(e.to_string()))?;
+
+	tokio::task::spawn_blocking(f)
+		.await
+		.map_err(|e| Error::Internal(e.to_string()))
+}
+
+/// Checks the length, bcrypt only uses the first 72 bytes
+pub fn check_password(password: &str) -> Result<()> {
 	if password.chars().count() < 10 {
 		return Err(Error::Invalid(
 			"the password needs at least 10 characters".into(),
 		));
 	}
+	if password.len() > 72 {
+		return Err(Error::Invalid(
+			"the password can have at most 72 bytes".into(),
+		));
+	}
 
-	tokio::task::spawn_blocking(move || {
-		bcrypt::hash(password, bcrypt::DEFAULT_COST)
-	})
-	.await
-	.map_err(|e| Error::Internal(e.to_string()))?
-	.map_err(|e| Error::Internal(e.to_string()))
+	Ok(())
 }
 
-fn hash_token(token: &str) -> String {
+pub async fn hash_password(password: String) -> Result<String> {
+	check_password(&password)?;
+
+	bcrypt_blocking(move || bcrypt::hash(password, bcrypt::DEFAULT_COST))
+		.await?
+		.map_err(|e| Error::Internal(e.to_string()))
+}
+
+pub fn hash_token(token: &str) -> String {
 	Sha256::digest(token.as_bytes())
 		.iter()
 		.map(|b| format!("{b:02x}"))
@@ -141,15 +188,7 @@ pub struct Users {
 
 impl Users {
 	pub async fn new(db: &Database) -> Self {
-		let migrations = db.migrations();
-		let mut conn = db.get().await.unwrap();
-
-		for (name, sql) in MIGRATIONS {
-			migrations
-				.add(&mut conn, name, sql)
-				.await
-				.expect("failed to run migration");
-		}
+		migrate(db, MIGRATIONS).await;
 
 		Self { db: db.clone() }
 	}
@@ -178,18 +217,30 @@ impl Users {
 			.await?)
 	}
 
-	/// `password_hash` from `hash_password`
+	pub async fn by_email(&self, email: &str) -> Result<Option<User>> {
+		let email = email.trim().to_lowercase();
+		let conn = self.db.get().await?;
+
+		Ok(conn
+			.connection()
+			.query_opt(
+				&format!("SELECT {USER_COLUMNS} FROM users WHERE email = $1"),
+				&[&email],
+			)
+			.await?)
+	}
+
+	/// `password_hash` from `hash_password` or `NO_PASSWORD`, with the sites
+	/// a user who is no admin sees
 	pub async fn create(
 		&self,
 		email: &str,
 		name: &str,
 		password_hash: &str,
 		admin: bool,
+		site_ids: &[UniqueId],
 	) -> Result<User> {
 		let (email, name) = normalize(email, name)?;
-		let conn = self.db.get().await?;
-		let conn = conn.connection();
-
 		let user = User {
 			id: UniqueId::new(),
 			email,
@@ -197,58 +248,48 @@ impl Users {
 			admin,
 			created_on: DateTime::now(),
 		};
-		let inserted = conn
-			.execute(
-				"INSERT INTO users
-				(id, email, name, password_hash, admin, created_on)
-				VALUES ($1, $2, $3, $4, $5, $6)
-				ON CONFLICT (email) DO NOTHING",
-				&[
-					&user.id,
-					&user.email,
-					&user.name,
-					&password_hash,
-					&user.admin,
-					&user.created_on,
-				],
-			)
-			.await?;
-		if inserted == 0 {
-			return Err(Error::Conflict(format!(
-				"{} already has an account",
-				user.email
-			)));
-		}
 
-		tracing::info!("created the user {} {}", user.email, user.id);
+		let mut conn = self.db.get().await?;
+		let trans = conn.transaction().await?;
+		let conn = trans.connection();
+
+		conn.execute(
+			"INSERT INTO users
+			(id, email, name, password_hash, admin, created_on)
+			VALUES ($1, $2, $3, $4, $5, $6)",
+			&[
+				&user.id,
+				&user.email,
+				&user.name,
+				&password_hash,
+				&user.admin,
+				&user.created_on,
+			],
+		)
+		.await?;
+		set_access(&conn, &user.id, site_ids).await?;
+
+		trans.commit().await?;
+		tracing::info!("created the user {}", user.id);
 		Ok(user)
 	}
 
+	/// With the sites a user who is no admin sees
 	pub async fn update(
 		&self,
 		id: &UniqueId,
 		email: &str,
 		name: &str,
 		admin: bool,
+		site_ids: &[UniqueId],
 	) -> Result<User> {
 		let (email, name) = normalize(email, name)?;
-		let conn = self.db.get().await?;
 
-		let taken: Option<UniqueId> = conn
-			.connection()
-			.query_opt::<IdRow, _>(
-				"SELECT id FROM users WHERE email = $1 AND id <> $2",
-				&[&email, id],
-			)
-			.await?
-			.map(|r| r.id);
-		if taken.is_some() {
-			return Err(Error::Conflict(format!(
-				"{email} already has an account"
-			)));
-		}
+		let mut conn = self.db.get().await?;
+		let trans = conn.transaction().await?;
+		let conn = trans.connection();
 
-		conn.connection()
+		let user: User = conn
 			.query_opt(
 				&format!(
 					"UPDATE users SET email = $2, name = $3, admin = $4
@@ -257,18 +298,24 @@ impl Users {
 				&[id, &email, &name, &admin],
 			)
 			.await?
-			.ok_or(Error::NotFound)
+			.ok_or(Error::NotFound)?;
+		set_access(&conn, id, site_ids).await?;
+
+		trans.commit().await?;
+		Ok(user)
 	}
 
-	/// `password_hash` from `hash_password`, ends every other session
+	/// `password_hash` from `hash_password`, ends every other session and
+	/// the password links
 	pub async fn set_password(
 		&self,
 		id: &UniqueId,
 		password_hash: &str,
-		keep_session: Option<&Token>,
+		keep_session: Option<&str>,
 	) -> Result<()> {
-		let conn = self.db.get().await?;
-		let conn = conn.connection();
+		let mut conn = self.db.get().await?;
+		let trans = conn.transaction().await?;
+		let conn = trans.connection();
 
 		conn.execute(
 			"UPDATE users SET password_hash = $2 WHERE id = $1",
@@ -277,11 +324,14 @@ impl Users {
 		.await?;
 		conn.execute(
 			"DELETE FROM user_sessions
-			WHERE user_id = $1 AND token IS DISTINCT FROM $2",
+			WHERE user_id = $1 AND token_hash IS DISTINCT FROM $2",
 			&[id, &keep_session],
 		)
 		.await?;
+		conn.execute("DELETE FROM password_links WHERE user_id = $1", &[id])
+			.await?;
 
+		trans.commit().await?;
 		Ok(())
 	}
 
@@ -296,8 +346,8 @@ impl Users {
 		Ok(())
 	}
 
-	/// The user if the email and password are right. An unknown email takes
-	/// as long as a wrong password.
+	/// The user if the email and password are right. An unknown email or a
+	/// user without a password takes as long as a wrong password.
 	pub async fn check_login(
 		&self,
 		email: &str,
@@ -318,71 +368,77 @@ impl Users {
 		let hash = found
 			.as_ref()
 			.map(|f| f.password_hash.clone())
+			.filter(|h| h != NO_PASSWORD)
 			.unwrap_or_else(|| DUMMY_HASH.clone());
-		let right = tokio::task::spawn_blocking(move || {
+		let right = bcrypt_blocking(move || {
 			bcrypt::verify(&password, &hash).unwrap_or(false)
 		})
-		.await
-		.unwrap_or(false);
+		.await?;
 
-		match found.filter(|_| right) {
+		match found.filter(|f| right && f.password_hash != NO_PASSWORD) {
 			Some(f) => self.by_id(&f.id).await,
 			None => Ok(None),
 		}
 	}
 
-	pub async fn new_session(&self, user_id: &UniqueId) -> Result<Session> {
+	/// Returns the token of the new session
+	pub async fn new_session(&self, user_id: &UniqueId) -> Result<String> {
+		let token = Token::new().to_string();
 		let conn = self.db.get().await?;
 
-		let session = Session {
-			token: Token::new(),
-			timeout: Timeout::new(SESSION_TIMEOUT),
-			user_id: *user_id,
-		};
 		conn.connection()
 			.execute(
 				"INSERT INTO user_sessions
-				(token, timeout, user_id, created_on)
+				(token_hash, timeout, user_id, created_on)
 				VALUES ($1, $2, $3, $4)",
 				&[
-					&session.token,
-					&session.timeout,
-					&session.user_id,
+					&hash_token(&token),
+					&Timeout::new(SESSION_TIMEOUT),
+					user_id,
 					&DateTime::now(),
 				],
 			)
 			.await?;
 
-		Ok(session)
+		Ok(token)
 	}
 
-	/// Returns the session if it exists and is not expired
-	pub async fn session(&self, token: &Token) -> Result<Option<Session>> {
+	/// The session of a token if it is valid, its timeout moves on
+	pub async fn session(&self, token: &str) -> Result<Option<Session>> {
 		let conn = self.db.get().await?;
+		let conn = conn.connection();
 
 		let session: Option<Session> = conn
-			.connection()
 			.query_opt(
-				"SELECT token, timeout, user_id FROM user_sessions
-				WHERE token = $1",
-				&[token],
+				"SELECT token_hash, timeout, user_id, created_on
+				FROM user_sessions WHERE token_hash = $1",
+				&[&hash_token(token)],
 			)
 			.await?;
+		let Some(mut session) = session.filter(Session::is_valid) else {
+			return Ok(None);
+		};
 
-		Ok(session.filter(|s| !s.timeout.has_elapsed()))
+		if session.should_extend() {
+			session.timeout = Timeout::new(SESSION_TIMEOUT);
+			conn.execute(
+				"UPDATE user_sessions SET timeout = $2 WHERE token_hash = $1",
+				&[&session.token_hash, &session.timeout],
+			)
+			.await?;
+		}
+
+		Ok(Some(session))
 	}
 
-	/// Replaces the session with a new one
-	pub async fn renew_session(&self, session: Session) -> Result<Session> {
-		self.delete_session(&session.token).await?;
-		self.new_session(&session.user_id).await
-	}
-
-	pub async fn delete_session(&self, token: &Token) -> Result<()> {
+	pub async fn delete_session(&self, token_hash: &str) -> Result<()> {
 		let conn = self.db.get().await?;
 
 		conn.connection()
-			.execute("DELETE FROM user_sessions WHERE token = $1", &[token])
+			.execute(
+				"DELETE FROM user_sessions WHERE token_hash = $1",
+				&[&token_hash],
+			)
 			.await?;
 
 		Ok(())
@@ -460,6 +516,26 @@ impl Users {
 		Ok(())
 	}
 
+	/// The user of an api token, marks the token as used
+	pub async fn by_token(&self, secret: &str) -> Result<Option<User>> {
+		let conn = self.db.get().await?;
+
+		let row: Option<IdRow> = conn
+			.connection()
+			.query_opt(
+				"UPDATE api_tokens SET last_used = $2
+				WHERE token_hash = $1 RETURNING user_id AS id",
+				&[&hash_token(secret), &DateTime::now()],
+			)
+			.await?;
+		drop(conn);
+
+		match row {
+			Some(r) => self.by_id(&r.id).await,
+			None => Ok(None),
+		}
+	}
+
 	/// A link to set the password, replaces the user's earlier links.
 	/// Returns the token, only its hash is stored.
 	pub async fn create_password_link(
@@ -467,8 +543,9 @@ impl Users {
 		user_id: &UniqueId,
 	) -> Result<String> {
 		let token = Token::new().to_string();
-		let conn = self.db.get().await?;
-		let conn = conn.connection();
+		let mut conn = self.db.get().await?;
+		let trans = conn.transaction().await?;
+		let conn = trans.connection();
 
 		conn.execute(
 			"DELETE FROM password_links WHERE user_id = $1",
@@ -486,6 +563,7 @@ impl Users {
 		)
 		.await?;
 
+		trans.commit().await?;
 		Ok(token)
 	}
 
@@ -512,65 +590,53 @@ impl Users {
 		}
 	}
 
-	/// Sets the password with a link and uses the link up
+	/// Uses the link up and sets the password, a link works only once even
+	/// if it is sent twice at the same time
 	pub async fn use_password_link(
 		&self,
 		token: &str,
 		password_hash: &str,
 	) -> Result<Option<User>> {
-		let Some(user) = self.password_link_user(token).await? else {
-			return Ok(None);
-		};
-
-		self.set_password(&user.id, password_hash, None).await?;
-		let conn = self.db.get().await?;
-		conn.connection()
-			.execute(
-				"DELETE FROM password_links WHERE user_id = $1",
-				&[&user.id],
-			)
-			.await?;
-
-		Ok(Some(user))
-	}
-
-	pub async fn by_email(&self, email: &str) -> Result<Option<User>> {
-		let email = email.trim().to_lowercase();
 		let conn = self.db.get().await?;
 
-		Ok(conn
+		let link: Option<LinkRow> = conn
 			.connection()
 			.query_opt(
-				&format!("SELECT {USER_COLUMNS} FROM users WHERE email = $1"),
-				&[&email],
-			)
-			.await?)
-	}
-
-	/// The user of an api token, marks the token as used
-	pub async fn by_token(&self, secret: &str) -> Result<Option<User>> {
-		let conn = self.db.get().await?;
-
-		let row: Option<IdRow> = conn
-			.connection()
-			.query_opt(
-				"UPDATE api_tokens SET last_used = $2
-				WHERE token_hash = $1 RETURNING user_id AS id",
-				&[&hash_token(secret), &DateTime::now()],
+				"DELETE FROM password_links WHERE token_hash = $1
+				RETURNING user_id, timeout",
+				&[&hash_token(token)],
 			)
 			.await?;
 		drop(conn);
 
-		match row {
-			Some(r) => self.by_id(&r.id).await,
-			None => Ok(None),
-		}
+		let Some(link) = link.filter(|l| !l.timeout.has_elapsed()) else {
+			return Ok(None);
+		};
+		self.set_password(&link.user_id, password_hash, None)
+			.await?;
+
+		self.by_id(&link.user_id).await
 	}
 }
 
-#[derive(FromRow)]
-struct IdRow {
-	id: UniqueId,
+/// Replaces the sites a user was given (the table belongs to the sites)
+async fn set_access(
+	conn: &pg::Connection<'_>,
+	user_id: &UniqueId,
+	site_ids: &[UniqueId],
+) -> Result<()> {
+	conn.execute("DELETE FROM site_users WHERE user_id = $1", &[user_id])
+		.await?;
+	for site_id in site_ids {
+		conn.execute(
+			"INSERT INTO site_users (site_id, user_id)
+			SELECT id, $2 FROM sites WHERE id = $1",
+			&[site_id, user_id],
+		)
+		.await?;
+	}
+
+	Ok(())
 }
 
 #[derive(FromRow)]
@@ -585,14 +651,8 @@ struct LoginRow {
 	password_hash: String,
 }
 
-fn session_token(parts: &Parts) -> Option<Token> {
-	parts
-		.headers
-		.get("session-token")?
-		.to_str()
-		.ok()?
-		.parse()
-		.ok()
+fn session_token(parts: &Parts) -> Option<&str> {
+	parts.headers.get("session-token")?.to_str().ok()
 }
 
 fn bearer(parts: &Parts) -> Option<&str> {
@@ -605,28 +665,8 @@ fn bearer(parts: &Parts) -> Option<&str> {
 		.map(str::trim)
 }
 
-/// A valid session from the `session-token` header
-pub struct AuthedSession(pub Session);
-
-impl<S> FromRequestParts<S> for AuthedSession
-where
-	S: Send + Sync,
-	Users: FromRef<S>,
-{
-	type Rejection = Error;
-
-	async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self> {
-		let token = session_token(parts).ok_or(Error::InvalidSessionToken)?;
-
-		Users::from_ref(state)
-			.session(&token)
-			.await?
-			.map(Self)
-			.ok_or(Error::InvalidSessionToken)
-	}
-}
-
-/// The user of a valid session, only the webui
+/// The user of a valid session from the `session-token` header, only the
+/// webui
 pub struct Authed {
 	pub session: Session,
 	pub user: User,
@@ -640,9 +680,14 @@ where
 	type Rejection = Error;
 
 	async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self> {
-		let AuthedSession(session) =
-			AuthedSession::from_request_parts(parts, state).await?;
-		let user = Users::from_ref(state)
+		let token = session_token(parts).ok_or(Error::InvalidSessionToken)?;
+		let users = Users::from_ref(state);
+
+		let session = users
+			.session(token)
+			.await?
+			.ok_or(Error::InvalidSessionToken)?;
+		let user = users
 			.by_id(&session.user_id)
 			.await?
 			.ok_or(Error::InvalidSessionToken)?;
@@ -707,5 +752,39 @@ mod tests {
 		let hash = hash_token("abc");
 		assert_eq!(hash.len(), 64);
 		assert!(hash.starts_with("ba7816bf"));
+	}
+
+	#[test]
+	fn password_lengths() {
+		assert!(check_password("short").is_err());
+		assert!(check_password("long enough").is_ok());
+		assert!(check_password(&"x".repeat(72)).is_ok());
+		assert!(check_password(&"x".repeat(73)).is_err());
+	}
+
+	#[test]
+	fn no_password_never_matches() {
+		assert!(!bcrypt::verify("!", NO_PASSWORD).unwrap_or(false));
+	}
+
+	#[test]
+	fn sessions_extend_and_end() {
+		let session = |timeout: Duration, age: Duration| Session {
+			token_hash: String::new(),
+			timeout: Timeout::new(timeout),
+			user_id: UniqueId::new(),
+			created_on: DateTime::from_std(std::time::SystemTime::now() - age),
+		};
+		let day = Duration::from_secs(24 * 60 * 60);
+
+		let fresh = session(SESSION_TIMEOUT, Duration::ZERO);
+		assert!(fresh.is_valid());
+		assert!(!fresh.should_extend());
+
+		let used_yesterday = session(SESSION_TIMEOUT - day, day);
+		assert!(used_yesterday.should_extend());
+
+		let too_old = session(SESSION_TIMEOUT, SESSION_MAX_AGE + day);
+		assert!(!too_old.is_valid());
 	}
 }

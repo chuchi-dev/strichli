@@ -19,7 +19,13 @@
 		if (nav.webdriver) return;
 
 		data.h = l.hostname;
-		var body = JSON.stringify(data);
+		var body;
+		try {
+			body = JSON.stringify(data);
+		} catch (e) {
+			// data the page passed that json can't hold (cycles, bigint)
+			return;
+		}
 		if (nav.sendBeacon && nav.sendBeacon(endpoint, body)) return;
 
 		fetch(endpoint, {
