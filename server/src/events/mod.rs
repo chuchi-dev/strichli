@@ -441,7 +441,11 @@ impl Events {
 						COALESCE(c.pageviews, 0) AS pageviews
 					FROM generate_series(
 						$2::text::date::timestamp,
-						$3::text::date::timestamp + interval '23 hours',
+						-- not into the future
+						LEAST(
+							$3::text::date::timestamp + interval '23 hours',
+							date_trunc('{unit}', now() AT TIME ZONE $4::text)
+						),
 						interval '1 {unit}'
 					) AS d(at)
 					LEFT JOIN (

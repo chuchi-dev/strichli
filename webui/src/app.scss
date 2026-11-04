@@ -1,0 +1,191 @@
+// light and dark are selected steps of the same palette, the series colors
+// are validated against their surface
+:root {
+	color-scheme: light;
+	--plane: #f9f9f7;
+	--surface: #fcfcfb;
+	--ink: #0b0b0b;
+	--ink-2: #52514e;
+	--muted: #898781;
+	--grid: #e1e0d9;
+	--axis: #c3c2b7;
+	--border: rgba(11, 11, 11, 0.1);
+	--wash: rgba(11, 11, 11, 0.04);
+	--accent: #2a78d6;
+	--accent-ink: #1d5fae;
+	--danger: #c22f2e;
+	--ok: #006300;
+	// visitors and pageviews
+	--series-1: #2a78d6;
+	--series-2: #eb6834;
+	--bar-tint: rgba(42, 120, 214, 0.14);
+	--radius: 6px;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root {
+		color-scheme: dark;
+		--plane: #0d0d0d;
+		--surface: #1a1a19;
+		--ink: #f0efec;
+		--ink-2: #c3c2b7;
+		--muted: #898781;
+		--grid: #2c2c2a;
+		--axis: #383835;
+		--border: rgba(255, 255, 255, 0.1);
+		--wash: rgba(255, 255, 255, 0.05);
+		--accent: #3987e5;
+		--accent-ink: #7fb2f0;
+		--danger: #e66767;
+		--ok: #0ca30c;
+		--series-1: #3987e5;
+		--series-2: #d95926;
+		--bar-tint: rgba(57, 135, 229, 0.22);
+	}
+}
+
+*,
+*::after,
+*::before {
+	margin: 0;
+	padding: 0;
+	box-sizing: border-box;
+	font-family: inherit;
+	font-size: inherit;
+	font-weight: inherit;
+	line-height: inherit;
+	color: inherit;
+}
+
+html {
+	font-family:
+		system-ui,
+		-apple-system,
+		'Segoe UI',
+		sans-serif;
+	font-size: 15px;
+	line-height: 1.4;
+	color: var(--ink);
+}
+
+body {
+	background-color: var(--plane);
+}
+
+h1 {
+	font-size: 1.6rem;
+	font-weight: 700;
+	margin-bottom: 1.5rem;
+}
+
+h2 {
+	font-size: 1.05rem;
+	font-weight: 600;
+	margin-bottom: 0.75rem;
+}
+
+a {
+	color: var(--accent-ink);
+}
+
+strong {
+	font-weight: 600;
+}
+
+input,
+select,
+textarea {
+	padding: 0.45rem 0.6rem;
+	border: 1px solid var(--axis);
+	border-radius: var(--radius);
+	background-color: var(--surface);
+
+	&:focus {
+		outline: 2px solid var(--accent);
+		outline-offset: -1px;
+	}
+}
+
+input[type='checkbox'] {
+	accent-color: var(--accent);
+}
+
+.card {
+	padding: 1.25rem;
+	background-color: var(--surface);
+	border: 1px solid var(--border);
+	border-radius: 10px;
+}
+
+.hint {
+	color: var(--ink-2);
+	font-size: 0.9rem;
+}
+
+.error {
+	color: var(--danger);
+}
+
+.muted {
+	color: var(--muted);
+}
+
+.num {
+	font-variant-numeric: tabular-nums;
+}
+
+pre.code {
+	padding: 0.75rem;
+	overflow-x: auto;
+	font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+	font-size: 0.85rem;
+	background-color: var(--wash);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	white-space: pre-wrap;
+	word-break: break-all;
+}
+
+table.list {
+	width: 100%;
+	border-collapse: collapse;
+
+	th,
+	td {
+		padding: 0.5rem 0.4rem;
+		text-align: left;
+		border-bottom: 1px solid var(--grid);
+	}
+
+	th {
+		font-size: 0.85rem;
+		font-weight: 600;
+		color: var(--ink-2);
+	}
+
+	.right {
+		text-align: right;
+	}
+}
+
+.row-buttons {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+	align-items: center;
+}
+
+.form {
+	display: grid;
+	gap: 0.9rem;
+	max-width: 28rem;
+}
+
+.sr-only {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip: rect(0 0 0 0);
+	white-space: nowrap;
+}

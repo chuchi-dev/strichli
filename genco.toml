@@ -1,0 +1,12 @@
+# genco (gs3): what a release builds and keeps, see `genco docs`.
+# The app runs `./strichli` in the release, on genco's HOST and PORT, with
+# the shared config.toml (database over the unix socket).
+shared = ["config.toml"]
+
+# on a build runner in the same build image as webtoolbelt: the webui and
+# the server
+[[build]]
+on = "runner"
+image = "docker.io/soerenmeier/chuchi-build"
+run = "cd webui && npm ci && npm run build && cd .. && cargo build --release --locked -p strichli && cp target/release/strichli ."
+artifacts = ["strichli", "webui/dist"]
