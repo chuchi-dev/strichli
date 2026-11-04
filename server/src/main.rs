@@ -6,9 +6,8 @@ mod sites;
 mod users;
 mod webui;
 
-use std::io::BufRead as _;
+use std::fs;
 use std::sync::Arc;
-use std::{fs, io};
 
 use axum::Router;
 use axum::extract::FromRef;
@@ -23,11 +22,13 @@ use tower_http::compression::CompressionLayer;
 use tower_http::cors::{self, CorsLayer};
 use tower_http::trace::TraceLayer;
 
+use crate::error::Error;
 use crate::events::Events;
 use crate::headers::SecurityHeaders;
 use crate::limits::{Allowed, Limits};
 use crate::sites::Sites;
-use crate::users::{Users, hash_password};
+use crate::users::routes::password_url;
+use crate::users::{NO_PASSWORD, Users};
 use crate::webui::Webui;
 
 #[derive(Debug, Parser)]
@@ -52,7 +53,7 @@ struct Args {
 
 #[derive(Debug, Subcommand)]
 enum Cmd {
-	/// Adds a user, the password is read from stdin
+	/// Adds a user and prints a link to set the password
 	AddUser {
 		#[arg(long)]
 		email: String,
@@ -61,6 +62,11 @@ enum Cmd {
 		/// sees and manages every site
 		#[arg(long)]
 		admin: bool,
+	},
+	/// Prints a new link to set the password of a user
+	PasswordLink {
+		#[arg(long)]
+		email: String,
 	},
 }
 
@@ -194,8 +200,11 @@ async fn main() {
 	let sites = Sites::new(&database).await;
 	let events = Events::new(&database, &cfg.timezone).await;
 
-	if let Some(Cmd::AddUser { email, name, admin }) = args.cmd {
-		add_user(&users, &email, &name, admin).await;
+	if let Some(cmd) = args.cmd {
+		if let Err(e) = run_cmd(cmd, &users, &cfg).await {
+			eprintln!("{e}");
+			std::process::exit(1);
+		}
 		return;
 	}
 
@@ -236,25 +245,26 @@ async fn main() {
 		.unwrap();
 }
 
-async fn add_user(users: &Users, email: &str, name: &str, admin: bool) {
-	let mut password = String::new();
-	io::stdin()
-		.lock()
-		.read_line(&mut password)
-		.expect("failed to read the password");
-	let password = password.trim_end_matches(['\r', '\n']).to_string();
-
-	let created = match hash_password(password).await {
-		Ok(hash) => users.create(email, name, &hash, admin).await,
-		Err(e) => Err(e),
-	};
-	match created {
-		Ok(user) => println!("added {} ({})", user.email, user.id),
-		Err(e) => {
-			eprintln!("{e}");
-			std::process::exit(1);
+async fn run_cmd(cmd: Cmd, users: &Users, cfg: &Config) -> error::Result<()> {
+	let user = match cmd {
+		Cmd::AddUser { email, name, admin } => {
+			let user = users.create(&email, &name, NO_PASSWORD, admin).await?;
+			println!("added {} ({})", user.email, user.id);
+			user
 		}
-	}
+		Cmd::PasswordLink { email } => users
+			.by_email(&email)
+			.await?
+			.ok_or_else(|| Error::Invalid(format!("no user {email}")))?,
+	};
+
+	let token = users.create_password_link(&user.id).await?;
+	println!(
+		"set the password within 7 days: {}",
+		password_url(&cfg.public_addr, &token)
+	);
+
+	Ok(())
 }
 
 async fn shutdown_signal() {

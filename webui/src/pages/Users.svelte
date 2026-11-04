@@ -13,11 +13,17 @@
 	import type { UserWithSites } from '@/api/users';
 	import { createUser, deleteUser, updateUser } from '@/api/users';
 	import Button from '@/components/Button.svelte';
+	import Copy from '@/components/Copy.svelte';
 	import Field from '@/components/Field.svelte';
 	import { getRouter, getSession } from '@/main';
 
-	const { users, sites }: { users: UserWithSites[]; sites: SiteOverview[] } =
-		$props();
+	const {
+		users: loaded,
+		sites,
+	}: { users: UserWithSites[]; sites: SiteOverview[] } = $props();
+
+	// svelte-ignore state_referenced_locally
+	const users = $state(loaded);
 
 	const router = getRouter();
 	const me = getSession().user;
@@ -31,6 +37,8 @@
 	let admin = $state(false);
 	let siteIds: string[] = $state([]);
 	let error = $state('');
+	/** of the user just added without a password */
+	let link = $state('');
 
 	function edit(user: UserWithSites | null) {
 		editing = user;
@@ -63,8 +71,17 @@
 			siteIds: admin ? [] : siteIds,
 		};
 		try {
-			if (editing) await updateUser(editing.id, req);
-			else await createUser(req);
+			if (editing) {
+				await updateUser(editing.id, req);
+			} else {
+				const user = await createUser(req);
+				if (user.passwordLink) {
+					link = user.passwordLink;
+					open = false;
+					users.push(user);
+					return;
+				}
+			}
 			router.open('/users');
 		} catch (e: any) {
 			error = e.message;
@@ -101,10 +118,9 @@
 				type="password"
 				bind:value={password}
 				autocomplete="new-password"
-				required={!editing}
 				hint={editing
 					? 'Leave empty to keep the password.'
-					: 'At least 10 characters.'}
+					: 'At least 10 characters, or empty for a link with which they set it themselves.'}
 			/>
 
 			<label class="check">
@@ -145,6 +161,13 @@
 				</Button>
 			</div>
 		</form>
+	</div>
+{/if}
+
+{#if link}
+	<div class="card link">
+		<h2>Send this link, it sets the password (valid 7 days)</h2>
+		<Copy text={link} />
 	</div>
 {/if}
 
@@ -192,7 +215,8 @@
 		align-items: flex-start;
 	}
 
-	.edit {
+	.edit,
+	.link {
 		margin-bottom: 1.5rem;
 	}
 

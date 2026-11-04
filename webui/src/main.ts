@@ -25,6 +25,7 @@ export type RouteResponse = {
 
 const TITLES: Record<string, string> = {
 	'/login': 'Login',
+	'/password': 'Set the password',
 	'/users': 'Users',
 	'/tokens': 'API tokens',
 	'/me': 'Account',

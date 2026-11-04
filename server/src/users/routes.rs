@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use pg::UniqueId;
@@ -11,8 +11,14 @@ use crate::error::{Error, Result};
 use crate::limits::ClientIp;
 
 use super::{
-	ApiToken, Authed, AuthedSession, Session, User, Users, hash_password,
+	ApiToken, Authed, AuthedSession, NO_PASSWORD, Session, User, Users,
+	hash_password,
 };
+
+/// The page that sets the password with a link's token
+pub fn password_url(public_addr: &str, token: &str) -> String {
+	format!("{public_addr}password?token={token}")
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -99,6 +105,63 @@ async fn change_password(
 	Ok(Json(()))
 }
 
+#[derive(Debug, Deserialize)]
+struct LinkQuery {
+	token: String,
+}
+
+#[derive(Debug, Serialize)]
+struct LinkUser {
+	email: String,
+	name: String,
+}
+
+/// Who a password link is for
+async fn password_link(
+	State(state): State<AppState>,
+	ip: ClientIp,
+	Query(q): Query<LinkQuery>,
+) -> Result<Json<LinkUser>> {
+	// the token can't be guessed, the page loads it right before the submit
+	state.collect_limits.check(ip)?;
+
+	let user = state
+		.users
+		.password_link_user(&q.token)
+		.await?
+		.ok_or(Error::NotFound)?;
+
+	Ok(Json(LinkUser {
+		email: user.email,
+		name: user.name,
+	}))
+}
+
+#[derive(Debug, Deserialize)]
+struct SetPasswordReq {
+	token: String,
+	password: String,
+}
+
+/// Sets the password with a link and logs in
+async fn set_password(
+	State(state): State<AppState>,
+	ip: ClientIp,
+	Json(req): Json<SetPasswordReq>,
+) -> Result<Json<Authenticated>> {
+	state.login_limits.check(ip)?;
+
+	let hash = hash_password(req.password).await?;
+	let user = state
+		.users
+		.use_password_link(&req.token, &hash)
+		.await?
+		.ok_or(Error::NotFound)?;
+	let session = state.users.new_session(&user.id).await?;
+
+	Ok(Json(Authenticated { session, user }))
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct UserResp {
@@ -106,6 +169,9 @@ struct UserResp {
 	user: User,
 	/// the sites a user who is no admin sees
 	site_ids: Vec<UniqueId>,
+	/// for a new user without a password: where they set it, valid 7 days
+	#[serde(skip_serializing_if = "Option::is_none")]
+	password_link: Option<String>,
 }
 
 async fn list(
@@ -123,6 +189,7 @@ async fn list(
 		.map(|user| UserResp {
 			site_ids: access.remove(&user.id).unwrap_or_default(),
 			user,
+			password_link: None,
 		})
 		.collect();
 
@@ -148,19 +215,28 @@ async fn create(
 ) -> Result<Json<UserResp>> {
 	authed.user.require_admin()?;
 
-	let password = req
-		.password
-		.ok_or_else(|| Error::Invalid("the password is missing".into()))?;
-	let hash = hash_password(password).await?;
+	// without a password the user sets it with a link
+	let hash = match req.password.filter(|p| !p.is_empty()) {
+		Some(p) => hash_password(p).await?,
+		None => NO_PASSWORD.into(),
+	};
 	let user = state
 		.users
 		.create(&req.email, &req.name, &hash, req.admin)
 		.await?;
 	state.sites.set_access(&user.id, &req.site_ids).await?;
 
+	let password_link = if hash == NO_PASSWORD {
+		let token = state.users.create_password_link(&user.id).await?;
+		Some(password_url(&state.cfg.public_addr, &token))
+	} else {
+		None
+	};
+
 	Ok(Json(UserResp {
 		user,
 		site_ids: req.site_ids,
+		password_link,
 	}))
 }
 
@@ -192,6 +268,7 @@ async fn update(
 	Ok(Json(UserResp {
 		user,
 		site_ids: req.site_ids,
+		password_link: None,
 	}))
 }
 
@@ -261,6 +338,10 @@ pub fn routes() -> Router<AppState> {
 		.route("/users/tokenauth", post(token_auth))
 		.route("/users/logout", post(logout))
 		.route("/users/password", post(change_password))
+		.route(
+			"/users/password-link",
+			get(password_link).post(set_password),
+		)
 		.route("/users", get(list).post(create))
 		.route("/users/{id}", put(update).delete(delete_user))
 		.route("/tokens", get(list_tokens).post(create_token))

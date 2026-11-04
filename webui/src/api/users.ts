@@ -44,7 +44,22 @@ export async function changePassword(
 export type UserWithSites = User & {
 	/** the sites a user who is no admin sees */
 	siteIds: string[];
+	/** for a new user without a password: where they set it */
+	passwordLink?: string;
 };
+
+export async function passwordLinkUser(
+	token: string,
+): Promise<{ email: string; name: string }> {
+	return await get(`users/password-link?token=${encodeURIComponent(token)}`);
+}
+
+export async function setPasswordWithLink(
+	token: string,
+	password: string,
+): Promise<Authenticated> {
+	return await post('users/password-link', { token, password });
+}
 
 export type UserReq = {
 	email: string;

@@ -18,15 +18,27 @@ use crate::error::{Error, Result};
 
 pub type Token = crypto::token::Token<32>;
 
-const MIGRATIONS: &[(&str, &str)] = &[(
-	"create-users",
-	include_str!("./migrations/create-users.sql"),
-)];
+const MIGRATIONS: &[(&str, &str)] = &[
+	(
+		"create-users",
+		include_str!("./migrations/create-users.sql"),
+	),
+	(
+		"create-password-links",
+		include_str!("./migrations/create-password-links.sql"),
+	),
+];
 
 /// 30 days
 const SESSION_TIMEOUT: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 /// renew the session once less than 10 days are remaining
 const RENEW_AFTER: Duration = Duration::from_secs(10 * 24 * 60 * 60);
+/// 7 days
+const PASSWORD_LINK_TIMEOUT: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+
+/// The password hash of a user who sets the password with a link, no
+/// password matches it
+pub const NO_PASSWORD: &str = "!";
 
 /// compared against for unknown emails, a login takes as long either way
 static DUMMY_HASH: LazyLock<String> =
@@ -448,6 +460,93 @@ impl Users {
 		Ok(())
 	}
 
+	/// A link to set the password, replaces the user's earlier links.
+	/// Returns the token, only its hash is stored.
+	pub async fn create_password_link(
+		&self,
+		user_id: &UniqueId,
+	) -> Result<String> {
+		let token = Token::new().to_string();
+		let conn = self.db.get().await?;
+		let conn = conn.connection();
+
+		conn.execute(
+			"DELETE FROM password_links WHERE user_id = $1",
+			&[user_id],
+		)
+		.await?;
+		conn.execute(
+			"INSERT INTO password_links (token_hash, user_id, timeout)
+			VALUES ($1, $2, $3)",
+			&[
+				&hash_token(&token),
+				user_id,
+				&Timeout::new(PASSWORD_LINK_TIMEOUT),
+			],
+		)
+		.await?;
+
+		Ok(token)
+	}
+
+	/// The user of a password link that is not expired
+	pub async fn password_link_user(
+		&self,
+		token: &str,
+	) -> Result<Option<User>> {
+		let conn = self.db.get().await?;
+
+		let link: Option<LinkRow> = conn
+			.connection()
+			.query_opt(
+				"SELECT user_id, timeout FROM password_links
+				WHERE token_hash = $1",
+				&[&hash_token(token)],
+			)
+			.await?;
+		drop(conn);
+
+		match link.filter(|l| !l.timeout.has_elapsed()) {
+			Some(l) => self.by_id(&l.user_id).await,
+			None => Ok(None),
+		}
+	}
+
+	/// Sets the password with a link and uses the link up
+	pub async fn use_password_link(
+		&self,
+		token: &str,
+		password_hash: &str,
+	) -> Result<Option<User>> {
+		let Some(user) = self.password_link_user(token).await? else {
+			return Ok(None);
+		};
+
+		self.set_password(&user.id, password_hash, None).await?;
+		let conn = self.db.get().await?;
+		conn.connection()
+			.execute(
+				"DELETE FROM password_links WHERE user_id = $1",
+				&[&user.id],
+			)
+			.await?;
+
+		Ok(Some(user))
+	}
+
+	pub async fn by_email(&self, email: &str) -> Result<Option<User>> {
+		let email = email.trim().to_lowercase();
+		let conn = self.db.get().await?;
+
+		Ok(conn
+			.connection()
+			.query_opt(
+				&format!("SELECT {USER_COLUMNS} FROM users WHERE email = $1"),
+				&[&email],
+			)
+			.await?)
+	}
+
 	/// The user of an api token, marks the token as used
 	pub async fn by_token(&self, secret: &str) -> Result<Option<User>> {
 		let conn = self.db.get().await?;
@@ -472,6 +571,12 @@ impl Users {
 #[derive(FromRow)]
 struct IdRow {
 	id: UniqueId,
+}
+
+#[derive(FromRow)]
+struct LinkRow {
+	user_id: UniqueId,
+	timeout: Timeout,
 }
 
 #[derive(FromRow)]

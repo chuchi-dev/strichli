@@ -59,7 +59,8 @@ npm run dev
 # in another shell, with a config.toml in server/
 cd server
 cargo run
-echo 'a-password' | cargo run -- add-user --email you@example.com --name You --admin
+# prints a link to set the password, `password-link --email` makes a new one
+cargo run -- add-user --email you@example.com --name You --admin
 ```
 
 In debug builds cors is enabled and `../webui/dist` is served. The dev
