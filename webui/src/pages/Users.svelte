@@ -15,7 +15,7 @@
 	import Button from '@/components/Button.svelte';
 	import Copy from '@/components/Copy.svelte';
 	import Field from '@/components/Field.svelte';
-	import { go } from '@/lib/router.svelte';
+	import Form from '@/components/Form.svelte';
 	import { session } from '@/lib/session.svelte';
 
 	const {
@@ -24,7 +24,7 @@
 	}: { users: UserWithSites[]; sites: SiteOverview[] } = $props();
 
 	// svelte-ignore state_referenced_locally
-	const users = $state(loaded);
+	let users = $state(loaded);
 
 	/** the user in the form, null for a new one */
 	let editing: UserWithSites | null = $state(null);
@@ -45,7 +45,7 @@
 		password = '';
 		admin = user?.admin ?? false;
 		siteIds = [...(user?.siteIds ?? [])];
-		error = '';
+		link = '';
 		open = true;
 	}
 
@@ -57,10 +57,8 @@
 					.map(s => s.name)
 					.join(', ') || 'No sites';
 
-	async function save(e: SubmitEvent) {
-		e.preventDefault();
-		error = '';
-
+	/** the list changes in place, the page stays */
+	async function save() {
 		const req = {
 			email,
 			name,
@@ -68,37 +66,34 @@
 			admin,
 			siteIds: admin ? [] : siteIds,
 		};
-		try {
-			if (editing) {
-				await updateUser(editing.id, req);
-			} else {
-				const user = await createUser(req);
-				if (user.passwordLink) {
-					link = user.passwordLink;
-					open = false;
-					users.push(user);
-					return;
-				}
-			}
-			go('/users');
-		} catch (e: any) {
-			error = e.message;
+
+		if (editing) {
+			const user = await updateUser(editing.id, req);
+			users = users.map(u => (u.id === user.id ? user : u));
+		} else {
+			const user = await createUser(req);
+			users = [...users, user].toSorted((a, b) =>
+				a.name.localeCompare(b.name),
+			);
+			link = user.passwordLink ?? '';
 		}
+		open = false;
 	}
 
 	async function remove(user: UserWithSites) {
 		if (!confirm(`Delete ${user.name} (${user.email})?`)) return;
 
+		error = '';
 		try {
 			await deleteUser(user.id);
-			go('/users');
+			users = users.filter(u => u.id !== user.id);
 		} catch (e: any) {
 			error = e.message;
 		}
 	}
 </script>
 
-<div class="title">
+<div class="title-row">
 	<h1>Users</h1>
 	{#if !open}
 		<Button onclick={() => edit(null)}>Add user</Button>
@@ -108,7 +103,7 @@
 {#if open}
 	<div class="card edit">
 		<h2>{editing ? `Edit ${editing.name}` : 'Add a user'}</h2>
-		<form class="form" onsubmit={save}>
+		<Form onsubmit={save} oncancel={() => (open = false)}>
 			<Field label="Name" bind:value={name} required />
 			<Field label="Email" type="email" bind:value={email} required />
 			<Field
@@ -148,18 +143,12 @@
 					{/each}
 				</fieldset>
 			{/if}
-
-			{#if error}
-				<p class="error">{error}</p>
-			{/if}
-			<div class="row-buttons">
-				<Button type="submit">Save</Button>
-				<Button kind="secondary" onclick={() => (open = false)}>
-					Cancel
-				</Button>
-			</div>
-		</form>
+		</Form>
 	</div>
+{/if}
+
+{#if error}
+	<p class="error">{error}</p>
 {/if}
 
 {#if link}
@@ -207,14 +196,11 @@
 </div>
 
 <style lang="scss">
-	.title {
-		display: flex;
-		justify-content: space-between;
-		align-items: flex-start;
-	}
+	@use 'styles/mixins' as *;
 
 	.edit,
-	.link {
+	.link,
+	.error {
 		margin-bottom: 1.5rem;
 	}
 
@@ -228,13 +214,12 @@
 		display: grid;
 		gap: 0.4rem;
 		padding: 0.75rem;
-		border: 1px solid var(--border);
+		border: 2px solid var(--border);
 		border-radius: var(--radius);
 
 		legend {
+			@include caps;
 			padding: 0 0.3rem;
-			font-size: 0.85rem;
-			font-weight: 600;
 			color: var(--ink-2);
 		}
 	}

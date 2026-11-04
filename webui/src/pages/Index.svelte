@@ -11,6 +11,7 @@
 	import { createSite } from '@/api/sites';
 	import Button from '@/components/Button.svelte';
 	import Field from '@/components/Field.svelte';
+	import Form from '@/components/Form.svelte';
 	import SiteCard from '@/components/SiteCard.svelte';
 	import { go } from '@/lib/router.svelte';
 	import { session } from '@/lib/session.svelte';
@@ -43,22 +44,14 @@
 	let adding = $state(false);
 	let domain = $state('');
 	let name = $state('');
-	let error = $state('');
 
-	async function add(e: SubmitEvent) {
-		e.preventDefault();
-		error = '';
-
-		try {
-			const site = await createSite(domain, name || domain);
-			go(`/sites/${site.id}?new=1`);
-		} catch (e: any) {
-			error = e.message;
-		}
+	async function add() {
+		const site = await createSite(domain, name || domain);
+		go(`/sites/${site.id}?new=1`);
 	}
 </script>
 
-<div class="title">
+<div class="title-row">
 	<h1>Sites</h1>
 	{#if session.user?.admin && !adding}
 		<Button onclick={() => (adding = true)}>Add site</Button>
@@ -68,7 +61,7 @@
 {#if adding}
 	<div class="card add">
 		<h2>Add a site</h2>
-		<form class="form" onsubmit={add}>
+		<Form onsubmit={add} submit="Add" oncancel={() => (adding = false)}>
 			<Field
 				label="Domain"
 				bind:value={domain}
@@ -77,16 +70,7 @@
 				required
 			/>
 			<Field label="Name" bind:value={name} placeholder="Example" />
-			{#if error}
-				<p class="error">{error}</p>
-			{/if}
-			<div class="row-buttons">
-				<Button type="submit">Add</Button>
-				<Button kind="secondary" onclick={() => (adding = false)}>
-					Cancel
-				</Button>
-			</div>
-		</form>
+		</Form>
 	</div>
 {/if}
 
@@ -130,12 +114,6 @@
 {/if}
 
 <style lang="scss">
-	.title {
-		display: flex;
-		justify-content: space-between;
-		align-items: flex-start;
-	}
-
 	.add {
 		margin-bottom: 1.5rem;
 	}

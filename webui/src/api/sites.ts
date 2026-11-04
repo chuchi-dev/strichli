@@ -1,4 +1,4 @@
-import { del, get, post, put } from './lib';
+import { del, get, post, put } from '@/lib/api';
 
 export type Site = {
 	id: string;
@@ -21,7 +21,15 @@ export type SiteOverview = Site & {
 	days: Bucket[];
 };
 
+/** days as `YYYY-MM-DD`, both included */
+export type Range = { from: string; to: string };
+
+/** a preset the server counts back from today, or days */
+export type RangeQuery = { range: string } | Range;
+
 export type Stats = {
+	/** the days of the stats */
+	range: Range;
 	visitors: number;
 	pageviews: number;
 	/** the buckets are hours */
@@ -41,27 +49,25 @@ export type EventRow = {
 };
 
 export type EventTable = {
+	range: Range;
 	/** the data fields of the keys in the range */
 	fields: string[];
 	rows: EventRow[];
 };
 
-/** days as `YYYY-MM-DD`, both included */
-export type Range = { from: string; to: string };
-
-const query = (r: Range) =>
-	`from=${encodeURIComponent(r.from)}&to=${encodeURIComponent(r.to)}`;
+const query = (q: RangeQuery) =>
+	new URLSearchParams(q as Record<string, string>).toString();
 
 export async function listSites(): Promise<SiteOverview[]> {
-	return await get('sites');
+	return await get('/sites');
 }
 
 export async function getSite(id: string): Promise<Site> {
-	return await get(`sites/${id}`);
+	return await get(`/sites/${id}`);
 }
 
 export async function createSite(domain: string, name: string): Promise<Site> {
-	return await post('sites', { domain, name });
+	return await post('/sites', { domain, name });
 }
 
 export async function updateSite(
@@ -69,23 +75,23 @@ export async function updateSite(
 	domain: string,
 	name: string,
 ): Promise<Site> {
-	return await put(`sites/${id}`, { domain, name });
+	return await put(`/sites/${id}`, { domain, name });
 }
 
 export async function deleteSite(id: string): Promise<void> {
-	await del(`sites/${id}`);
+	await del(`/sites/${id}`);
 }
 
-export async function getStats(id: string, range: Range): Promise<Stats> {
-	return await get(`sites/${id}/stats?${query(range)}`);
+export async function getStats(id: string, q: RangeQuery): Promise<Stats> {
+	return await get(`/sites/${id}/stats?${query(q)}`);
 }
 
 /** the keys grouped by the values of the data fields (at most 5) */
 export async function getEvents(
 	id: string,
-	range: Range,
+	q: RangeQuery,
 	fields: string[],
 ): Promise<EventTable> {
 	const f = encodeURIComponent(fields.join(','));
-	return await get(`sites/${id}/events?${query(range)}&fields=${f}`);
+	return await get(`/sites/${id}/events?${query(q)}&fields=${f}`);
 }

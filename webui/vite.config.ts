@@ -9,5 +9,9 @@ export default defineConfig(() => {
 		resolve: {
 			alias: [{ find: '@', replacement: resolve(__dirname, 'src') }],
 		},
+		server: {
+			// the server, `cargo run` in server/
+			proxy: { '/api': 'http://127.0.0.1:8080' },
+		},
 	};
 });

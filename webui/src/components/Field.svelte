@@ -36,17 +36,15 @@
 </label>
 
 <style lang="scss">
+	@use 'styles/mixins' as *;
+
 	.field {
 		display: grid;
 		gap: 0.3rem;
 	}
 
 	.label {
-		font-family: var(--mono);
-		font-size: 0.72rem;
-		font-weight: 600;
-		letter-spacing: 0.06em;
-		text-transform: uppercase;
+		@include caps;
 		color: var(--ink-2);
 	}
 </style>

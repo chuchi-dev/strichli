@@ -6,6 +6,7 @@
 		href?: string;
 		type?: 'button' | 'submit';
 		kind?: 'primary' | 'secondary' | 'danger';
+		small?: boolean;
 		disabled?: boolean;
 		onclick?: (e: MouseEvent) => void;
 		children: Snippet;
@@ -15,6 +16,7 @@
 		href,
 		type = 'button',
 		kind = 'primary',
+		small = false,
 		disabled = false,
 		onclick,
 		children,
@@ -22,23 +24,21 @@
 </script>
 
 {#if href}
-	<a {href} class="button {kind}">{@render children()}</a>
+	<a {href} class="button {kind}" class:small>{@render children()}</a>
 {:else}
-	<button {type} class="button {kind}" {disabled} {onclick}>
+	<button {type} class="button {kind}" class:small {disabled} {onclick}>
 		{@render children()}
 	</button>
 {/if}
 
 <style lang="scss">
 	// a chunky button that presses down into its shadow
+	@use 'styles/mixins' as *;
+
 	.button {
+		@include caps(0.8rem);
 		display: inline-block;
 		padding: 0.5rem 1rem;
-		font-family: var(--mono);
-		font-size: 0.8rem;
-		font-weight: 600;
-		letter-spacing: 0.05em;
-		text-transform: uppercase;
 		text-decoration: none;
 		color: var(--ink);
 		background-color: var(--surface);
@@ -70,6 +70,12 @@
 			opacity: 0.5;
 			cursor: default;
 		}
+	}
+
+	.small {
+		padding: 0.25rem 0.6rem;
+		font-size: 0.72rem;
+		box-shadow: 2px 2px 0 var(--shadow);
 	}
 
 	.primary {

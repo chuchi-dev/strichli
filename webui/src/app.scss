@@ -1,3 +1,5 @@
+@use 'styles/mixins' as *;
+
 // a tally sheet: paper with a fine grid, ink borders with hard shadows,
 // the logo's blue for data and its orange stroke as the marker. Light and
 // dark are selected steps, the series colors are validated against their
@@ -13,7 +15,6 @@
 	--grid: #e6e1d4;
 	--axis: #c9c2b2;
 	--border: #16130f;
-	--hairline: rgba(22, 19, 15, 0.14);
 	--shadow: #16130f;
 	--wash: rgba(22, 19, 15, 0.05);
 	--marker: #eb6834;
@@ -48,7 +49,6 @@
 	--grid: #2e3238;
 	--axis: #454a52;
 	--border: #5b616b;
-	--hairline: rgba(255, 255, 255, 0.12);
 	--shadow: #000;
 	--wash: rgba(255, 255, 255, 0.05);
 	--marker: #e0652f;
@@ -145,14 +145,23 @@ input[type='checkbox'] {
 	accent-color: var(--marker);
 }
 
-// a small label in caps, for column heads and units
-.label-caps {
-	font-family: var(--mono);
-	font-size: 0.72rem;
-	font-weight: 600;
-	letter-spacing: 0.06em;
-	text-transform: uppercase;
-	color: var(--muted);
+// a page's title with its buttons or controls on the right
+.title-row {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: space-between;
+	align-items: flex-start;
+	gap: 1rem;
+}
+
+.space-top {
+	margin-top: 1.5rem;
+}
+
+// a single card in the middle (login, password)
+.card.narrow {
+	max-width: 24rem;
+	margin: 3rem auto 0;
 }
 
 .card {
@@ -186,6 +195,10 @@ pre.code {
 	font-family: var(--mono);
 }
 
+code {
+	font-size: 0.85em;
+}
+
 pre.code {
 	padding: 0.75rem;
 	overflow-x: auto;
@@ -209,11 +222,7 @@ table.list {
 	}
 
 	th {
-		font-family: var(--mono);
-		font-size: 0.72rem;
-		font-weight: 600;
-		letter-spacing: 0.06em;
-		text-transform: uppercase;
+		@include caps;
 		color: var(--muted);
 		border-bottom: 2px solid var(--border);
 	}

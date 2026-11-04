@@ -1,35 +1,15 @@
-import type { Range } from '@/api/sites';
+import type { RangeQuery } from '@/api/sites';
 
-export type Preset = {
-	id: string;
-	label: string;
-	/** how many days back from today, 0 is only today */
-	days: number;
-};
-
-export const PRESETS: Preset[] = [
-	{ id: 'today', label: 'Today', days: 0 },
-	{ id: '7d', label: '7 days', days: 6 },
-	{ id: '30d', label: '30 days', days: 29 },
-	{ id: '90d', label: '90 days', days: 89 },
-	{ id: '12m', label: '12 months', days: 364 },
+/** the server counts them back from today in its timezone */
+export const PRESETS = [
+	{ id: 'today', label: 'Today' },
+	{ id: '7d', label: '7 days' },
+	{ id: '30d', label: '30 days' },
+	{ id: '90d', label: '90 days' },
+	{ id: '12m', label: '12 months' },
 ];
 
-export const DEFAULT_PRESET = '30d';
-
-/** `YYYY-MM-DD` in the browser's timezone */
-export function isoDate(date: Date): string {
-	const pad = (n: number) => String(n).padStart(2, '0');
-	return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-}
-
-export function presetRange(preset: Preset): Range {
-	const to = new Date();
-	const from = new Date();
-	from.setDate(from.getDate() - preset.days);
-
-	return { from: isoDate(from), to: isoDate(to) };
-}
+const DEFAULT_PRESET = '30d';
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -41,18 +21,15 @@ export function rangeFromProps(props: {
 	range?: string;
 	from?: string;
 	to?: string;
-}): { range: Range; preset: string | null } {
-	if (
-		props.from &&
-		props.to &&
-		ISO_DATE.test(props.from) &&
-		ISO_DATE.test(props.to)
-	) {
-		return { range: { from: props.from, to: props.to }, preset: null };
+}): { query: RangeQuery; preset: string | null } {
+	if (props.from && props.to) {
+		if (ISO_DATE.test(props.from) && ISO_DATE.test(props.to)) {
+			return { query: { from: props.from, to: props.to }, preset: null };
+		}
 	}
 
-	const preset =
-		PRESETS.find(p => p.id === props.range) ??
-		PRESETS.find(p => p.id === DEFAULT_PRESET)!;
-	return { range: presetRange(preset), preset: preset.id };
+	const preset = PRESETS.some(p => p.id === props.range)
+		? props.range!
+		: DEFAULT_PRESET;
+	return { query: { range: preset }, preset };
 }

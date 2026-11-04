@@ -12,6 +12,7 @@
 	import Button from '@/components/Button.svelte';
 	import Copy from '@/components/Copy.svelte';
 	import Field from '@/components/Field.svelte';
+	import Form from '@/components/Form.svelte';
 	import { timestamp } from '@/lib/format';
 
 	const { tokens: loaded }: { tokens: ApiToken[] } = $props();
@@ -22,18 +23,11 @@
 	let secret = $state('');
 	let error = $state('');
 
-	async function create(e: SubmitEvent) {
-		e.preventDefault();
-		error = '';
-
-		try {
-			const token = await createToken(name);
-			secret = token.secret;
-			tokens = [...tokens, token];
-			name = '';
-		} catch (e: any) {
-			error = e.message;
-		}
+	async function create() {
+		const token = await createToken(name);
+		secret = token.secret;
+		tokens = [...tokens, token];
+		name = '';
 	}
 
 	async function remove(token: ApiToken) {
@@ -64,15 +58,9 @@
 </p>
 
 <div class="card">
-	<form class="form" onsubmit={create}>
+	<Form onsubmit={create} submit="Create token">
 		<Field label="Name" bind:value={name} placeholder="noah" required />
-		{#if error}
-			<p class="error">{error}</p>
-		{/if}
-		<div>
-			<Button type="submit">Create token</Button>
-		</div>
-	</form>
+	</Form>
 
 	{#if secret}
 		<div class="secret">
@@ -81,7 +69,7 @@
 		</div>
 	{/if}
 
-	<h2 class="space">Add a site</h2>
+	<h2 class="space-top">Add a site</h2>
 	<pre class="code">{example}</pre>
 	<p class="hint">
 		Also: <code>GET /api/sites</code>
@@ -94,6 +82,10 @@
 		.
 	</p>
 </div>
+
+{#if error}
+	<p class="error list-card">{error}</p>
+{/if}
 
 {#if tokens.length}
 	<div class="card list-card">
@@ -138,17 +130,8 @@
 		margin-top: 1.5rem;
 	}
 
-	.space {
-		margin-top: 1.5rem;
-	}
-
 	.hint {
 		margin-top: 0.5rem;
-	}
-
-	code {
-		font-family: var(--mono);
-		font-size: 0.85em;
 	}
 
 	.list-card {

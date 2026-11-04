@@ -43,6 +43,8 @@
 </main>
 
 <style lang="scss">
+	@use 'styles/mixins' as *;
+
 	header {
 		background-color: var(--surface);
 		border-bottom: 2px solid var(--border);
@@ -91,11 +93,7 @@
 
 		a {
 			padding: 0.35rem 0.6rem;
-			font-family: var(--mono);
-			font-size: 0.8rem;
-			font-weight: 600;
-			letter-spacing: 0.05em;
-			text-transform: uppercase;
+			@include caps(0.8rem);
 			color: var(--ink-2);
 			text-decoration: none;
 			white-space: nowrap;

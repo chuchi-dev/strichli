@@ -1,6 +1,7 @@
 <script module lang="ts">
 	import { getEvents, getSite, getStats } from '@/api/sites';
 	import { rangeFromProps } from '@/lib/range';
+	import { session } from '@/lib/session.svelte';
 
 	type Props = {
 		id: string;
@@ -13,25 +14,24 @@
 	const MAX_COLUMNS = 5;
 
 	export async function loadProps(props: Props) {
-		const { range, preset } = rangeFromProps(props);
-		const tab =
-			props.tab === 'events' || props.tab === 'settings'
-				? props.tab
-				: 'visitors';
+		const { query, preset } = rangeFromProps(props);
+		let tab = props.tab === 'events' ? 'events' : 'visitors';
+		if (props.tab === 'settings' && session.user?.admin) tab = 'settings';
 		const site = await getSite(props.id);
-		const base = { site, current: range, preset, tab };
+		const base = { site, query, preset, tab };
 
 		if (tab === 'events') {
 			// the fields come with the first answer, show them as columns
-			let events = await getEvents(props.id, range, []);
+			let events = await getEvents(props.id, query, []);
 			const columns = events.fields.slice(0, MAX_COLUMNS);
-			if (columns.length)
-				events = await getEvents(props.id, range, columns);
+			if (columns.length) {
+				events = await getEvents(props.id, query, columns);
+			}
 			return { ...base, events, columns };
 		}
 
 		if (tab === 'visitors') {
-			return { ...base, stats: await getStats(props.id, range) };
+			return { ...base, stats: await getStats(props.id, query) };
 		}
 
 		return base;
@@ -39,7 +39,13 @@
 </script>
 
 <script lang="ts">
-	import type { EventTable, Range, Site, Stats } from '@/api/sites';
+	import type {
+		EventTable,
+		Range,
+		RangeQuery,
+		Site,
+		Stats,
+	} from '@/api/sites';
 	import { deleteSite, updateSite } from '@/api/sites';
 	import BarList from '@/components/BarList.svelte';
 	import Button from '@/components/Button.svelte';
@@ -47,14 +53,14 @@
 	import Copy from '@/components/Copy.svelte';
 	import EventsView from '@/components/EventsView.svelte';
 	import Field from '@/components/Field.svelte';
+	import Form from '@/components/Form.svelte';
 	import RangePicker from '@/components/RangePicker.svelte';
 	import { num } from '@/lib/format';
 	import { go } from '@/lib/router.svelte';
-	import { session } from '@/lib/session.svelte';
 
 	type Loaded = {
 		site: Site;
-		current: Range;
+		query: RangeQuery;
 		preset: string | null;
 		tab: 'visitors' | 'events' | 'settings';
 		stats?: Stats;
@@ -65,8 +71,8 @@
 	};
 
 	const {
-		site,
-		current,
+		site: loaded,
+		query,
 		preset,
 		tab,
 		stats,
@@ -75,28 +81,27 @@
 		new: isNew,
 	}: Loaded = $props();
 
+	// changes with the settings
+	// svelte-ignore state_referenced_locally
+	let site = $state(loaded);
+	/** the days shown, as the server resolved them */
+	const current = $derived(stats?.range ?? events?.range ?? null);
+
 	$effect(() => {
 		document.title = `${site.name} - strichli`;
 	});
 
 	/** the page with another tab or range, the rest stays */
 	function link(opts: { tab?: string; range?: string; custom?: Range }) {
-		// eslint-disable-next-line svelte/prefer-svelte-reactivity -- a local value, not state
-		const params = new URLSearchParams();
 		const t = opts.tab ?? tab;
-		if (t !== 'visitors') params.set('tab', t);
+		const params: Record<string, string> =
+			t === 'visitors' ? {} : { tab: t };
+		Object.assign(
+			params,
+			opts.custom ?? (opts.range ? { range: opts.range } : query),
+		);
 
-		if (opts.custom) {
-			params.set('from', opts.custom.from);
-			params.set('to', opts.custom.to);
-		} else if (opts.range ?? preset) {
-			params.set('range', (opts.range ?? preset)!);
-		} else {
-			params.set('from', current.from);
-			params.set('to', current.to);
-		}
-
-		return `/sites/${site.id}?${params}`;
+		return `/sites/${site.id}?${new URLSearchParams(params)}`;
 	}
 
 	const TABS = [
@@ -110,18 +115,10 @@
 	let domain = $state(site.domain);
 	// svelte-ignore state_referenced_locally
 	let name = $state(site.name);
-	let settingsError = $state('');
+	let deleteError = $state('');
 
-	async function save(e: SubmitEvent) {
-		e.preventDefault();
-		settingsError = '';
-
-		try {
-			await updateSite(site.id, domain, name);
-			go(link({}));
-		} catch (e: any) {
-			settingsError = e.message;
-		}
+	async function save() {
+		site = await updateSite(site.id, domain, name);
 	}
 
 	async function remove() {
@@ -130,18 +127,19 @@
 		);
 		if (!sure) return;
 
+		deleteError = '';
 		try {
 			await deleteSite(site.id);
 			go('/');
 		} catch (e: any) {
-			settingsError = e.message;
+			deleteError = e.message;
 		}
 	}
 
 	const keyExample = `strichli('signup', { plan: 'pro' });`;
 </script>
 
-<div class="title">
+<div class="title-row">
 	<div>
 		<h1>{site.name}</h1>
 		<a
@@ -154,7 +152,7 @@
 		</a>
 	</div>
 
-	{#if tab !== 'settings'}
+	{#if current}
 		<RangePicker
 			range={current}
 			{preset}
@@ -244,7 +242,7 @@
 		</p>
 	{/if}
 {:else if tab === 'events' && events}
-	<EventsView siteId={site.id} range={current} table={events} {columns} />
+	<EventsView siteId={site.id} {query} table={events} {columns} />
 {:else if tab === 'settings'}
 	<div class="card">
 		<h2>Script</h2>
@@ -253,28 +251,24 @@
 			Send events with <code>{keyExample}</code>
 		</p>
 
-		<h2 class="space">Site</h2>
-		<form class="form" onsubmit={save}>
+		<h2 class="space-top">Site</h2>
+		<Form onsubmit={save} done="Saved">
 			<Field label="Domain" bind:value={domain} required />
 			<Field label="Name" bind:value={name} required />
-			{#if settingsError}
-				<p class="error">{settingsError}</p>
-			{/if}
-			<div class="row-buttons">
-				<Button type="submit">Save</Button>
+			{#snippet extra()}
 				<Button kind="danger" onclick={remove}>Delete site</Button>
-			</div>
-		</form>
+			{/snippet}
+		</Form>
+		{#if deleteError}
+			<p class="error">{deleteError}</p>
+		{/if}
 	</div>
 {/if}
 
 <style lang="scss">
-	.title {
-		display: flex;
-		flex-wrap: wrap;
-		justify-content: space-between;
-		align-items: flex-start;
-		gap: 1rem;
+	@use 'styles/mixins' as *;
+
+	.title-row {
 		margin-bottom: 1rem;
 
 		h1 {
@@ -297,11 +291,7 @@
 		a {
 			padding: 0.5rem 0.9rem;
 			margin-bottom: -2px;
-			font-family: var(--mono);
-			font-size: 0.82rem;
-			font-weight: 600;
-			letter-spacing: 0.05em;
-			text-transform: uppercase;
+			@include caps(0.82rem);
 			color: var(--ink-2);
 			text-decoration: none;
 			border-bottom: 5px solid transparent;
@@ -337,11 +327,7 @@
 		min-width: 11rem;
 
 		.label {
-			font-family: var(--mono);
-			font-size: 0.72rem;
-			font-weight: 600;
-			letter-spacing: 0.06em;
-			text-transform: uppercase;
+			@include caps;
 			color: var(--muted);
 		}
 
@@ -370,13 +356,5 @@
 
 	.hint {
 		margin-top: 0.5rem;
-	}
-
-	code {
-		font-size: 0.85em;
-	}
-
-	.space {
-		margin-top: 1.5rem;
 	}
 </style>

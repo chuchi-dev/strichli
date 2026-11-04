@@ -1,8 +1,10 @@
 <script lang="ts">
 	import type { Range } from '@/api/sites';
 	import { PRESETS } from '@/lib/range';
+	import Segmented from './Segmented.svelte';
 
 	type Props = {
+		/** the days shown, from the server */
 		range: Range;
 		/** the id of the preset, null for custom days */
 		preset: string | null;
@@ -24,17 +26,12 @@
 </script>
 
 <div class="picker">
-	<div class="presets" role="group" aria-label="Time range">
-		{#each PRESETS as p (p.id)}
-			<button
-				class:active={p.id === preset}
-				aria-pressed={p.id === preset}
-				onclick={() => onpreset(p.id)}
-			>
-				{p.label}
-			</button>
-		{/each}
-	</div>
+	<Segmented
+		label="Time range"
+		options={PRESETS}
+		value={preset}
+		onchange={onpreset}
+	/>
 
 	<form class="custom" onsubmit={custom}>
 		<input type="date" bind:value={from} aria-label="From" max={to} />
@@ -52,41 +49,6 @@
 		align-items: center;
 	}
 
-	.presets {
-		display: flex;
-		flex-wrap: wrap;
-		background-color: var(--surface);
-		border: 2px solid var(--border);
-		border-radius: var(--radius);
-		box-shadow: 3px 3px 0 var(--shadow);
-		overflow: hidden;
-	}
-
-	button {
-		padding: 0.35rem 0.7rem;
-		font-family: var(--mono);
-		font-size: 0.78rem;
-		font-weight: 600;
-		color: var(--ink-2);
-		background: none;
-		border: none;
-		cursor: pointer;
-
-		&:hover {
-			color: var(--ink);
-			background-color: var(--wash);
-		}
-
-		&.active {
-			color: var(--marker-ink);
-			background-color: var(--marker);
-		}
-	}
-
-	.presets button + button {
-		border-left: 2px solid var(--border);
-	}
-
 	.custom {
 		display: flex;
 		gap: 0.4rem;
@@ -100,8 +62,24 @@
 		}
 
 		button {
+			padding: 0.3rem 0.6rem;
+			font-family: var(--mono);
+			font-size: 0.78rem;
+			font-weight: 600;
+			color: var(--ink-2);
+			background-color: var(--surface);
 			border: 2px solid var(--border);
 			border-radius: var(--radius);
+			cursor: pointer;
+
+			&:hover {
+				color: var(--ink);
+			}
+
+			&.active {
+				color: var(--marker-ink);
+				background-color: var(--marker);
+			}
 		}
 	}
 </style>

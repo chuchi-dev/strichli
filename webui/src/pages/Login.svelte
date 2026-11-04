@@ -10,38 +10,27 @@
 </script>
 
 <script lang="ts">
-	import Button from '@/components/Button.svelte';
-	import Field from '@/components/Field.svelte';
 	import { login } from '@/api/users';
+	import Field from '@/components/Field.svelte';
+	import Form from '@/components/Form.svelte';
 	import { go } from '@/lib/router.svelte';
 
 	let email = $state('');
 	let password = $state('');
-	let error = $state('');
-	let busy = $state(false);
 
-	async function submit(e: SubmitEvent) {
-		e.preventDefault();
-		error = '';
-		busy = true;
-
-		try {
-			session.login(await login(email, password));
-			// back to the page that asked for the login
-			const url = new URLSearchParams(location.search).get('url');
-			go(url?.startsWith('/') ? url : '/');
-		} catch (e: any) {
-			error = e.message;
-		} finally {
-			busy = false;
-		}
+	async function submit() {
+		const resp = await login(email, password);
+		session.login(resp.token, resp.user);
+		// back to the page that asked for the login
+		const url = new URLSearchParams(location.search).get('url');
+		go(url?.startsWith('/') ? url : '/');
 	}
 </script>
 
-<div class="login card">
+<div class="card narrow">
 	<h1>Login</h1>
 
-	<form class="form" onsubmit={submit}>
+	<Form onsubmit={submit} submit="Login">
 		<Field
 			label="Email"
 			type="email"
@@ -56,20 +45,5 @@
 			autocomplete="current-password"
 			required
 		/>
-
-		{#if error}
-			<p class="error">{error}</p>
-		{/if}
-
-		<div>
-			<Button type="submit" disabled={busy}>Login</Button>
-		</div>
-	</form>
+	</Form>
 </div>
-
-<style lang="scss">
-	.login {
-		max-width: 24rem;
-		margin: 3rem auto 0;
-	}
-</style>

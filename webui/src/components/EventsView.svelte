@@ -1,17 +1,19 @@
 <script lang="ts">
-	import type { EventRow, EventTable, Range } from '@/api/sites';
+	import type { EventRow, EventTable, RangeQuery } from '@/api/sites';
 	import { getEvents } from '@/api/sites';
+	import { newest } from '@/lib/api';
 	import { num } from '@/lib/format';
+	import Button from './Button.svelte';
 
 	type Props = {
 		siteId: string;
-		range: Range;
+		query: RangeQuery;
 		table: EventTable;
 		/** the data fields shown as columns */
 		columns: string[];
 	};
 
-	const { siteId, range, table: loaded, columns: initial }: Props = $props();
+	const { siteId, query, table: loaded, columns: initial }: Props = $props();
 
 	const MAX_COLUMNS = 5;
 
@@ -39,14 +41,18 @@
 	const total = $derived(rows.reduce((a, r) => a + r.count, 0));
 	const addable = $derived(table.fields.filter(f => !columns.includes(f)));
 
-	async function setColumns(next: string[]) {
+	const load = newest();
+
+	function setColumns(next: string[]) {
 		error = '';
-		try {
-			table = await getEvents(siteId, range, next);
-			columns = next;
-		} catch (e: any) {
-			error = e.message;
-		}
+		load(
+			getEvents(siteId, query, next),
+			t => {
+				table = t;
+				columns = next;
+			},
+			e => (error = e.message),
+		);
 	}
 
 	function add(e: Event) {
@@ -56,7 +62,11 @@
 	}
 
 	function download() {
-		const esc = (s: string) => `"${s.replaceAll('"', '""')}"`;
+		// visitors choose the values: no formulas for spreadsheets
+		const esc = (s: string) => {
+			const safe = /^[=+\-@\t\r]/.test(s) ? `'${s}` : s;
+			return `"${safe.replaceAll('"', '""')}"`;
+		};
 		const lines = [
 			['key', ...columns, 'count'].map(esc).join(','),
 			...rows.map(r =>
@@ -68,7 +78,7 @@
 		const blob = new Blob([lines.join('\n') + '\n'], { type: 'text/csv' });
 		const a = document.createElement('a');
 		a.href = URL.createObjectURL(blob);
-		a.download = `events-${range.from}-${range.to}.csv`;
+		a.download = `events-${table.range.from}-${table.range.to}.csv`;
 		a.click();
 		URL.revokeObjectURL(a.href);
 	}
@@ -105,9 +115,14 @@
 			{/if}
 		</div>
 
-		<button class="download" onclick={download} disabled={!rows.length}>
+		<Button
+			kind="secondary"
+			small
+			onclick={download}
+			disabled={!rows.length}
+		>
 			Download CSV
-		</button>
+		</Button>
 	</div>
 
 	{#if error}
@@ -198,30 +213,6 @@
 
 		span {
 			color: var(--muted);
-		}
-	}
-
-	.download {
-		padding: 0.4rem 0.8rem;
-		font-family: var(--mono);
-		font-size: 0.78rem;
-		font-weight: 600;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		background-color: var(--surface);
-		border: 2px solid var(--border);
-		border-radius: var(--radius);
-		box-shadow: 3px 3px 0 var(--shadow);
-		cursor: pointer;
-
-		&:active:not(:disabled) {
-			transform: translate(3px, 3px);
-			box-shadow: none;
-		}
-
-		&:disabled {
-			opacity: 0.5;
-			cursor: default;
 		}
 	}
 

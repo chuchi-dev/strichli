@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Bucket } from '@/api/sites';
 	import { bucketLabel, bucketTitle, num } from '@/lib/format';
+	import Button from './Button.svelte';
 
 	type Props = {
 		buckets: Bucket[];
@@ -106,9 +107,9 @@
 			</li>
 		</ul>
 
-		<button class="toggle" onclick={() => (showTable = !showTable)}>
+		<Button kind="secondary" small onclick={() => (showTable = !showTable)}>
 			{showTable ? 'Chart' : 'Table'}
-		</button>
+		</Button>
 	</div>
 
 	{#if showTable}
@@ -249,23 +250,6 @@
 			display: flex;
 			align-items: center;
 			gap: 0.4rem;
-		}
-	}
-
-	.toggle {
-		padding: 0.2rem 0.5rem;
-		font-family: var(--mono);
-		font-size: 0.75rem;
-		font-weight: 600;
-		text-transform: uppercase;
-		color: var(--ink-2);
-		background: none;
-		border: 2px solid var(--border);
-		border-radius: var(--radius);
-		cursor: pointer;
-
-		&:hover {
-			background-color: var(--wash);
 		}
 	}
 

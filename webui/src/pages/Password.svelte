@@ -1,21 +1,26 @@
 <script module lang="ts">
 	import { passwordLinkUser } from '@/api/users';
+	import { ApiError } from '@/lib/api';
 
 	export const isPublic = true;
 
 	export async function loadProps(props: { token?: string }) {
 		try {
 			return { user: await passwordLinkUser(props.token ?? '') };
-		} catch (_e) {
-			return { user: null };
+		} catch (e) {
+			// only an unknown link is invalid, other errors show as such
+			if (e instanceof ApiError && e.type === 'NOT_FOUND') {
+				return { user: null };
+			}
+			throw e;
 		}
 	}
 </script>
 
 <script lang="ts">
 	import { setPasswordWithLink } from '@/api/users';
-	import Button from '@/components/Button.svelte';
 	import Field from '@/components/Field.svelte';
+	import Form from '@/components/Form.svelte';
 	import { go } from '@/lib/router.svelte';
 	import { session } from '@/lib/session.svelte';
 
@@ -28,30 +33,19 @@
 
 	let password = $state('');
 	let repeat = $state('');
-	let error = $state('');
-	let busy = $state(false);
 
-	async function submit(e: SubmitEvent) {
-		e.preventDefault();
-		error = '';
+	async function submit() {
 		if (password !== repeat) {
-			error = 'The passwords are not the same';
-			return;
+			throw new Error('The passwords are not the same');
 		}
 
-		busy = true;
-		try {
-			session.login(await setPasswordWithLink(token, password));
-			go('/');
-		} catch (e: any) {
-			error = e.message;
-		} finally {
-			busy = false;
-		}
+		const resp = await setPasswordWithLink(token, password);
+		session.login(resp.token, resp.user);
+		go('/');
 	}
 </script>
 
-<div class="password card">
+<div class="card narrow">
 	<h1>Set the password</h1>
 
 	{#if !user}
@@ -61,7 +55,7 @@
 	{:else}
 		<p class="hint who">{user.name}, {user.email}</p>
 
-		<form class="form" onsubmit={submit}>
+		<Form onsubmit={submit} submit="Set and log in">
 			<input
 				type="email"
 				value={user.email}
@@ -84,24 +78,11 @@
 				autocomplete="new-password"
 				required
 			/>
-
-			{#if error}
-				<p class="error">{error}</p>
-			{/if}
-
-			<div>
-				<Button type="submit" disabled={busy}>Set and log in</Button>
-			</div>
-		</form>
+		</Form>
 	{/if}
 </div>
 
 <style lang="scss">
-	.password {
-		max-width: 24rem;
-		margin: 3rem auto 0;
-	}
-
 	.who {
 		margin-bottom: 1rem;
 	}

@@ -60,17 +60,15 @@
 </div>
 
 <style lang="scss">
+	@use 'styles/mixins' as *;
+
 	.head {
 		display: flex;
 		justify-content: space-between;
 		align-items: baseline;
 
 		.unit {
-			font-family: var(--mono);
-			font-size: 0.72rem;
-			font-weight: 600;
-			letter-spacing: 0.06em;
-			text-transform: uppercase;
+			@include caps;
 			color: var(--muted);
 		}
 	}

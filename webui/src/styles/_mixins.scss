@@ -1,0 +1,8 @@
+// small caps in the mono font: column heads, units, labels, tabs
+@mixin caps($size: 0.72rem) {
+	font-family: var(--mono);
+	font-size: $size;
+	font-weight: 600;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+}
