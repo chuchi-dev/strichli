@@ -1,14 +1,17 @@
 //! Sites and their stats, for the webui and api tokens
 
-use axum::extract::{Path, Query, State};
-use axum::routing::get;
+use axum::extract::{DefaultBodyLimit, Path, Query, State};
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use pg::UniqueId;
 use serde::{Deserialize, Serialize};
 
 use crate::AppState;
 use crate::error::{Error, Result};
-use crate::events::{Bucket, EventQuery, EventTable, Range, Stats};
+use crate::events::import::{SIMPLE_ANALYTICS, parse_line};
+use crate::events::{
+	Bucket, EventQuery, EventTable, ImportResult, Range, Stats,
+};
 use crate::users::Caller;
 
 use super::Site;
@@ -137,10 +140,46 @@ async fn events(
 	Ok(Json(state.events.events(&site.id, &query).await?))
 }
 
+/// The history from Simple Analytics' export api as ndjson, replaces an
+/// earlier import
+async fn import_simple_analytics(
+	State(state): State<AppState>,
+	caller: Caller,
+	Path(id): Path<UniqueId>,
+	body: String,
+) -> Result<Json<ImportResult>> {
+	caller.user.require_admin()?;
+	let site = state.sites.get(&caller.user, &id).await?;
+
+	let events: Vec<_> = body
+		.lines()
+		.filter_map(|line| parse_line(line, &site.domain))
+		.collect();
+	let result = state
+		.events
+		.import(&site.id, SIMPLE_ANALYTICS, &events)
+		.await?;
+
+	tracing::info!(
+		"imported {} events from simple analytics for {} ({} overlapping, \
+		{} replaced)",
+		result.imported,
+		site.domain,
+		result.overlapping,
+		result.replaced
+	);
+	Ok(Json(result))
+}
+
 pub fn routes() -> Router<AppState> {
 	Router::new()
 		.route("/", get(list).post(create))
 		.route("/{id}", get(get_site).put(update).delete(delete))
 		.route("/{id}/stats", get(stats))
 		.route("/{id}/events", get(events))
+		.route(
+			"/{id}/import/simpleanalytics",
+			post(import_simple_analytics)
+				.layer(DefaultBodyLimit::max(64 * 1024 * 1024)),
+		)
 }
