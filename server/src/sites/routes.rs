@@ -74,7 +74,7 @@ async fn create(
 	caller: Caller,
 	Json(req): Json<SiteReq>,
 ) -> Result<Json<SiteResp>> {
-	caller.user.require_admin()?;
+	caller.require_admin()?;
 
 	let site = state.sites.create(&req.domain, &req.name).await?;
 	Ok(Json(site_resp(&state, site)))
@@ -95,7 +95,7 @@ async fn update(
 	Path(id): Path<UniqueId>,
 	Json(req): Json<SiteReq>,
 ) -> Result<Json<SiteResp>> {
-	caller.user.require_admin()?;
+	caller.require_admin()?;
 
 	let site = state.sites.update(&id, &req.domain, &req.name).await?;
 	Ok(Json(site_resp(&state, site)))
@@ -107,7 +107,7 @@ async fn delete(
 	caller: Caller,
 	Path(id): Path<UniqueId>,
 ) -> Result<Json<()>> {
-	caller.user.require_admin()?;
+	caller.require_admin()?;
 	if caller.via_token {
 		return Err(Error::Invalid(
 			"sites can only be deleted in the webui".into(),
@@ -148,7 +148,7 @@ async fn import_simple_analytics(
 	Path(id): Path<UniqueId>,
 	body: String,
 ) -> Result<Json<ImportResult>> {
-	caller.user.require_admin()?;
+	caller.require_admin()?;
 	let site = state.sites.get(&caller.user, &id).await?;
 
 	let events: Vec<_> = body

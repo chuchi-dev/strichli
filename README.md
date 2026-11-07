@@ -37,8 +37,9 @@ agent and `navigator.webdriver`.
 
 Every user creates api tokens in the webui (API tokens); a token acts as
 its user on the sites routes, send it as `authorization: Bearer <token>`.
-An admin's token manages sites, any other user's token only reads the
-stats of the sites the user was given (e.g. a client's spreadsheet).
+A token reads the stats of the sites its user sees (e.g. a client's
+spreadsheet). An admin can also create a token that writes: it adds and
+changes sites, a read token gets `READ_ONLY` there.
 
 - `GET /api/sites` sites with the last 30 days
 - `POST /api/sites` `{ "domain", "name" }` adds a site, the response has

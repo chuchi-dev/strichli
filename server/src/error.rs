@@ -20,6 +20,8 @@ pub enum Error {
 	InvalidApiToken,
 	#[error("Only admins can do this")]
 	AdminOnly,
+	#[error("This api token can only read")]
+	ReadOnly,
 	#[error("Not found")]
 	NotFound,
 	#[error("{0}")]
@@ -36,7 +38,7 @@ impl Error {
 			Self::LoginIncorrect
 			| Self::InvalidSessionToken
 			| Self::InvalidApiToken => StatusCode::UNAUTHORIZED,
-			Self::AdminOnly => StatusCode::FORBIDDEN,
+			Self::AdminOnly | Self::ReadOnly => StatusCode::FORBIDDEN,
 			Self::NotFound => StatusCode::NOT_FOUND,
 			Self::Conflict(_) => StatusCode::CONFLICT,
 			Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,

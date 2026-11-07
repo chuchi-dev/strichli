@@ -18,7 +18,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use tokio::sync::Semaphore;
 
-use crate::db::{IdRow, migrate};
+use crate::db::migrate;
 use crate::error::{Error, Result};
 
 pub type Token = crypto::token::Token<32>;
@@ -35,6 +35,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
 	(
 		"hash-sessions",
 		include_str!("./migrations/hash-sessions.sql"),
+	),
+	(
+		"add-token-write",
+		include_str!("./migrations/add-token-write.sql"),
 	),
 ];
 
@@ -112,6 +116,8 @@ impl Session {
 pub struct ApiToken {
 	pub id: UniqueId,
 	pub name: String,
+	/// adds and changes sites, else it only reads
+	pub can_write: bool,
 	pub created_on: DateTime,
 	pub last_used: Option<DateTime>,
 }
@@ -450,7 +456,7 @@ impl Users {
 		Ok(conn
 			.connection()
 			.query(
-				"SELECT id, name, created_on, last_used FROM api_tokens
+				"SELECT id, name, can_write, created_on, last_used FROM api_tokens
 				WHERE user_id = $1 ORDER BY created_on",
 				&[user_id],
 			)
@@ -462,6 +468,7 @@ impl Users {
 		&self,
 		user_id: &UniqueId,
 		name: &str,
+		can_write: bool,
 	) -> Result<(ApiToken, String)> {
 		let name = name.trim();
 		if name.is_empty() {
@@ -472,6 +479,7 @@ impl Users {
 		let token = ApiToken {
 			id: UniqueId::new(),
 			name: name.into(),
+			can_write,
 			created_on: DateTime::now(),
 			last_used: None,
 		};
@@ -480,11 +488,12 @@ impl Users {
 		conn.connection()
 			.execute(
 				"INSERT INTO api_tokens
-				(id, name, token_hash, user_id, created_on)
-				VALUES ($1, $2, $3, $4, $5)",
+				(id, name, can_write, token_hash, user_id, created_on)
+				VALUES ($1, $2, $3, $4, $5, $6)",
 				&[
 					&token.id,
 					&token.name,
+					&token.can_write,
 					&hash_token(&secret),
 					user_id,
 					&token.created_on,
@@ -516,24 +525,25 @@ impl Users {
 		Ok(())
 	}
 
-	/// The user of an api token, marks the token as used
-	pub async fn by_token(&self, secret: &str) -> Result<Option<User>> {
+	/// The user of an api token and whether it can write, marks the token
+	/// as used
+	pub async fn by_token(&self, secret: &str) -> Result<Option<(User, bool)>> {
 		let conn = self.db.get().await?;
 
-		let row: Option<IdRow> = conn
+		let row: Option<TokenUserRow> = conn
 			.connection()
 			.query_opt(
 				"UPDATE api_tokens SET last_used = $2
-				WHERE token_hash = $1 RETURNING user_id AS id",
+				WHERE token_hash = $1 RETURNING user_id, can_write",
 				&[&hash_token(secret), &DateTime::now()],
 			)
 			.await?;
 		drop(conn);
 
-		match row {
-			Some(r) => self.by_id(&r.id).await,
-			None => Ok(None),
-		}
+		let Some(row) = row else {
+			return Ok(None);
+		};
+		Ok(self.by_id(&row.user_id).await?.map(|u| (u, row.can_write)))
 	}
 
 	/// A link to set the password, replaces the user's earlier links.
@@ -696,11 +706,30 @@ where
 	}
 }
 
+#[derive(Debug, FromRow)]
+struct TokenUserRow {
+	user_id: UniqueId,
+	can_write: bool,
+}
+
 /// The user of a session or of an api token
 /// (`authorization: Bearer <token>`)
 pub struct Caller {
 	pub user: User,
 	pub via_token: bool,
+	/// a session or a token that can write
+	pub can_write: bool,
+}
+
+impl Caller {
+	/// An admin, and not with a token that only reads
+	pub fn require_admin(&self) -> Result<()> {
+		self.user.require_admin()?;
+		if !self.can_write {
+			return Err(Error::ReadOnly);
+		}
+		Ok(())
+	}
 }
 
 impl<S> FromRequestParts<S> for Caller
@@ -712,7 +741,7 @@ where
 
 	async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self> {
 		if let Some(secret) = bearer(parts) {
-			let user = Users::from_ref(state)
+			let (user, can_write) = Users::from_ref(state)
 				.by_token(secret)
 				.await?
 				.ok_or(Error::InvalidApiToken)?;
@@ -720,6 +749,7 @@ where
 			return Ok(Self {
 				user,
 				via_token: true,
+				can_write,
 			});
 		}
 
@@ -727,6 +757,7 @@ where
 		Ok(Self {
 			user: authed.user,
 			via_token: false,
+			can_write: true,
 		})
 	}
 }

@@ -84,6 +84,8 @@ export async function deleteUser(id: string): Promise<void> {
 export type ApiToken = {
 	id: string;
 	name: string;
+	/** adds and changes sites, else it only reads */
+	canWrite: boolean;
 	createdOn: string;
 	lastUsed: string | null;
 };
@@ -92,10 +94,12 @@ export async function listTokens(): Promise<ApiToken[]> {
 	return await get('/tokens');
 }
 
+/** `write` only for admins */
 export async function createToken(
 	name: string,
+	write: boolean,
 ): Promise<ApiToken & { secret: string }> {
-	return await post('/tokens', { name });
+	return await post('/tokens', { name, write });
 }
 
 export async function deleteToken(id: string): Promise<void> {

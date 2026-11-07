@@ -21,14 +21,16 @@
 	// svelte-ignore state_referenced_locally
 	let tokens = $state(loaded);
 	let name = $state('');
+	let write = $state(false);
 	let secret = $state('');
 	let error = $state('');
 
 	async function create() {
-		const token = await createToken(name);
+		const token = await createToken(name, write);
 		secret = token.secret;
 		tokens = [...tokens, token];
 		name = '';
+		write = false;
 	}
 
 	async function remove(token: ApiToken) {
@@ -62,9 +64,9 @@
 
 <p class="hint intro">
 	{#if session.user?.admin}
-		A token acts as you on the sites api, for scripts and AI agents: list
-		sites and their stats, add and change sites. Deleting a site needs the
-		webui.
+		A token reads the stats of all sites, for scripts, spreadsheets or AI
+		agents. One that can write also adds and changes sites. Deleting a site
+		needs the webui.
 	{:else}
 		A token reads the stats of your sites, for scripts, spreadsheets or AI
 		agents. It can't change anything.
@@ -73,7 +75,18 @@
 
 <div class="card">
 	<Form onsubmit={create} submit="Create token">
-		<Field label="Name" bind:value={name} placeholder="spreadsheet" required />
+		<Field
+			label="Name"
+			bind:value={name}
+			placeholder="spreadsheet"
+			required
+		/>
+		{#if session.user?.admin}
+			<label class="check">
+				<input type="checkbox" bind:checked={write} />
+				Can write: add and change sites
+			</label>
+		{/if}
 	</Form>
 
 	{#if secret}
@@ -105,7 +118,7 @@
 	</p>
 
 	{#if session.user?.admin}
-		<h2 class="space-top">Add a site</h2>
+		<h2 class="space-top">Add a site, with a token that can write</h2>
 		<pre class="code">{example}</pre>
 		<p class="hint">
 			Change one with <code>PUT /api/sites/&#123;id&#125;</code>
@@ -124,6 +137,9 @@
 			<thead>
 				<tr>
 					<th>Name</th>
+					{#if session.user?.admin}
+						<th>Access</th>
+					{/if}
 					<th>Created</th>
 					<th>Last used</th>
 					<th></th>
@@ -133,6 +149,11 @@
 				{#each tokens as token (token.id)}
 					<tr>
 						<td>{token.name}</td>
+						{#if session.user?.admin}
+							<td>
+								{token.canWrite ? 'Read and write' : 'Read'}
+							</td>
+						{/if}
 						<td>{timestamp(token.createdOn)}</td>
 						<td>
 							{token.lastUsed
@@ -155,6 +176,12 @@
 	.intro {
 		max-width: 40rem;
 		margin-bottom: 1.5rem;
+	}
+
+	.check {
+		display: flex;
+		gap: 0.5rem;
+		align-items: center;
 	}
 
 	.secret {

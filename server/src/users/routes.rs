@@ -296,8 +296,8 @@ async fn delete_user(
 	Ok(Json(()))
 }
 
-/// The own api tokens. A token acts as its user: an admin's manages
-/// sites, any other user's only reads the stats of the user's sites.
+/// The own api tokens. A token reads the stats of its user's sites, an
+/// admin's can also write: add and change sites.
 async fn list_tokens(
 	State(users): State<Users>,
 	authed: Authed,
@@ -308,6 +308,9 @@ async fn list_tokens(
 #[derive(Debug, Deserialize)]
 struct TokenReq {
 	name: String,
+	/// only for admins
+	#[serde(default)]
+	write: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -324,8 +327,13 @@ async fn create_token(
 	authed: Authed,
 	Json(req): Json<TokenReq>,
 ) -> Result<Json<NewToken>> {
-	let (token, secret) =
-		users.create_token(&authed.user.id, &req.name).await?;
+	if req.write {
+		authed.user.require_admin()?;
+	}
+
+	let (token, secret) = users
+		.create_token(&authed.user.id, &req.name, req.write)
+		.await?;
 	Ok(Json(NewToken { token, secret }))
 }
 
