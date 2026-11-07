@@ -296,13 +296,12 @@ async fn delete_user(
 	Ok(Json(()))
 }
 
-/// The own api tokens, only admins have them
+/// The own api tokens. A token acts as its user: an admin's manages
+/// sites, any other user's only reads the stats of the user's sites.
 async fn list_tokens(
 	State(users): State<Users>,
 	authed: Authed,
 ) -> Result<Json<Vec<ApiToken>>> {
-	authed.user.require_admin()?;
-
 	Ok(Json(users.tokens(&authed.user.id).await?))
 }
 
@@ -325,8 +324,6 @@ async fn create_token(
 	authed: Authed,
 	Json(req): Json<TokenReq>,
 ) -> Result<Json<NewToken>> {
-	authed.user.require_admin()?;
-
 	let (token, secret) =
 		users.create_token(&authed.user.id, &req.name).await?;
 	Ok(Json(NewToken { token, secret }))

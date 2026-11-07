@@ -28,10 +28,10 @@
 				<a href="/" class:active={active('/')}>Sites</a>
 				{#if user.admin}
 					<a href="/users" class:active={active('/users')}>Users</a>
-					<a href="/tokens" class:active={active('/tokens')}>
-						API tokens
-					</a>
 				{/if}
+				<a href="/tokens" class:active={active('/tokens')}>
+					API tokens
+				</a>
 				<a href="/me" class:active={active('/me')}>{user.name}</a>
 			</nav>
 		{/if}

@@ -14,6 +14,7 @@
 	import Field from '@/components/Field.svelte';
 	import Form from '@/components/Form.svelte';
 	import { timestamp } from '@/lib/format';
+	import { session } from '@/lib/session.svelte';
 
 	const { tokens: loaded }: { tokens: ApiToken[] } = $props();
 
@@ -42,6 +43,13 @@
 	}
 
 	const origin = location.origin;
+	const auth = $derived(
+		`  -H 'authorization: Bearer ${secret || '<token>'}'`,
+	);
+	const readExample = $derived(
+		`curl ${origin}/api/sites \\\n${auth}\n\n` +
+			`curl '${origin}/api/sites/<id>/stats?range=30d' \\\n${auth}`,
+	);
 	const example = $derived(
 		`curl ${origin}/api/sites \\\n` +
 			`  -H 'authorization: Bearer ${secret || '<token>'}' \\\n` +
@@ -53,13 +61,19 @@
 <h1>API tokens</h1>
 
 <p class="hint intro">
-	A token acts as you on the sites api, for scripts and AI agents: list sites
-	and their stats, add and change sites. Deleting a site needs the webui.
+	{#if session.user?.admin}
+		A token acts as you on the sites api, for scripts and AI agents: list
+		sites and their stats, add and change sites. Deleting a site needs the
+		webui.
+	{:else}
+		A token reads the stats of your sites, for scripts, spreadsheets or AI
+		agents. It can't change anything.
+	{/if}
 </p>
 
 <div class="card">
 	<Form onsubmit={create} submit="Create token">
-		<Field label="Name" bind:value={name} placeholder="noah" required />
+		<Field label="Name" bind:value={name} placeholder="spreadsheet" required />
 	</Form>
 
 	{#if secret}
@@ -69,18 +83,35 @@
 		</div>
 	{/if}
 
-	<h2 class="space-top">Add a site</h2>
-	<pre class="code">{example}</pre>
+	<h2 class="space-top">Read the stats</h2>
+	<pre class="code">{readExample}</pre>
 	<p class="hint">
-		Also: <code>GET /api/sites</code>
+		<code>range</code>
+		is
+		<code>today</code>
 		,
-		<code>
-			GET /api/sites/&#123;id&#125;/stats?from=2026-11-01&to=2026-11-30
-		</code>
+		<code>7d</code>
 		,
-		<code>PUT /api/sites/&#123;id&#125;</code>
+		<code>30d</code>
+		,
+		<code>90d</code>
+		or
+		<code>12m</code>
+		, or use
+		<code>from=2026-11-01&to=2026-11-30</code>
+		. The events of a site:
+		<code>/api/sites/&#123;id&#125;/events?range=30d&fields=domain</code>
 		.
 	</p>
+
+	{#if session.user?.admin}
+		<h2 class="space-top">Add a site</h2>
+		<pre class="code">{example}</pre>
+		<p class="hint">
+			Change one with <code>PUT /api/sites/&#123;id&#125;</code>
+			.
+		</p>
+	{/if}
 </div>
 
 {#if error}
