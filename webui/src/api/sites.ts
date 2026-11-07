@@ -27,6 +27,8 @@ export type Range = { from: string; to: string };
 /** a preset the server counts back from today, or days */
 export type RangeQuery = { range: string } | Range;
 
+export type NameCount = { name: string | null; visitors: number };
+
 export type Stats = {
 	/** the days of the stats */
 	range: Range;
@@ -39,6 +41,11 @@ export type Stats = {
 	/** referrer null is a direct visit */
 	referrers: { referrer: string | null; visitors: number }[];
 	keys: { key: string; count: number }[];
+	/** visitors by device (mobile, tablet, desktop), browser and os; null
+	 * for visits from before they were counted */
+	devices: NameCount[];
+	browsers: NameCount[];
+	oses: NameCount[];
 };
 
 export type EventRow = {

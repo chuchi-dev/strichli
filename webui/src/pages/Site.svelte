@@ -143,6 +143,21 @@
 		}
 	}
 
+	const DEVICES: Record<string, string> = {
+		mobile: 'Mobile',
+		tablet: 'Tablet',
+		desktop: 'Desktop',
+	};
+	const breakdowns = $derived(
+		stats
+			? [
+					{ title: 'Devices', items: stats.devices },
+					{ title: 'Browsers', items: stats.browsers },
+					{ title: 'OS', items: stats.oses },
+				]
+			: [],
+	);
+
 	const keyExample = `strichli('signup', { plan: 'pro' });`;
 </script>
 
@@ -241,6 +256,23 @@
 		>
 			{#snippet label(k)}{k.key}{/snippet}
 		</BarList>
+
+		{#each breakdowns as b (b.title)}
+			<BarList
+				title={b.title}
+				unit="Visitors"
+				items={b.items}
+				value={n => n.visitors}
+			>
+				{#snippet label(n)}
+					{#if n.name}{DEVICES[n.name] ?? n.name}{:else}<span
+							class="muted"
+						>
+							Unknown
+						</span>{/if}
+				{/snippet}
+			</BarList>
+		{/each}
 	</div>
 
 	{#if stats.keys.length}

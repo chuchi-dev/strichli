@@ -6,6 +6,7 @@
 //! is no reload, no back or forward and no navigation inside a single page
 //! app. Days and hours are in the configured timezone.
 
+pub mod device;
 pub mod import;
 pub mod routes;
 
@@ -22,12 +23,15 @@ use crate::db::migrate;
 use crate::error::{Error, Result};
 use crate::sites::normalize_domain;
 
+use self::device::Device;
+
 const MIGRATIONS: &[(&str, &str)] = &[
 	(
 		"create-events",
 		include_str!("./migrations/create-events.sql"),
 	),
 	("add-source", include_str!("./migrations/add-source.sql")),
+	("add-device", include_str!("./migrations/add-device.sql")),
 ];
 
 const MAX_PATH: usize = 512;
@@ -82,6 +86,9 @@ pub struct Payload {
 	/// the data of a custom event
 	#[serde(default)]
 	pub d: Option<Map<String, Value>>,
+	/// the page saw a touch screen
+	#[serde(default)]
+	pub t: bool,
 }
 
 /// An event ready to be stored
@@ -92,6 +99,8 @@ pub struct NewEvent {
 	pub is_unique: bool,
 	pub key: Option<String>,
 	pub data: Option<Value>,
+	/// none for imported events
+	pub device: Option<Device>,
 }
 
 pub fn is_bot(user_agent: Option<&str>) -> bool {
@@ -191,6 +200,7 @@ pub fn noscript_pageview(page_url: &str) -> Result<(String, NewEvent)> {
 		is_unique: false,
 		key: None,
 		data: None,
+		device: None,
 	};
 	Ok((normalize_domain(host)?, event))
 }
@@ -203,9 +213,15 @@ fn external_referrer(referrer: Option<&str>, domain: &str) -> Option<String> {
 }
 
 impl Payload {
-	/// The event for the site with this domain
-	pub fn into_event(self, domain: &str) -> Result<NewEvent> {
+	/// The event for the site with this domain, from a browser with this
+	/// user agent
+	pub fn into_event(
+		self,
+		domain: &str,
+		user_agent: &str,
+	) -> Result<NewEvent> {
 		let path = clean_path(&self.p)?;
+		let device = Some(Device::from_agent(user_agent, self.t));
 
 		if let Some(key) = self.k {
 			return Ok(NewEvent {
@@ -214,6 +230,7 @@ impl Payload {
 				is_unique: false,
 				key: Some(check_key(&key)?),
 				data: self.d.map(check_data).transpose()?.flatten(),
+				device,
 			});
 		}
 
@@ -229,6 +246,7 @@ impl Payload {
 			is_unique: !self.s && !from_site && !revisit,
 			key: None,
 			data: None,
+			device,
 		})
 	}
 }
@@ -338,6 +356,14 @@ pub struct ReferrerCount {
 	pub visitors: i64,
 }
 
+/// Visitors by device, browser or os, none for events from before
+#[derive(Debug, Clone, Serialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct NameCount {
+	pub name: Option<String>,
+	pub visitors: i64,
+}
+
 #[derive(Debug, Clone, Serialize, FromRow)]
 #[serde(rename_all = "camelCase")]
 pub struct KeyCount {
@@ -433,6 +459,9 @@ pub struct Stats {
 	pub pages: Vec<PageCount>,
 	pub referrers: Vec<ReferrerCount>,
 	pub keys: Vec<KeyCount>,
+	pub devices: Vec<NameCount>,
+	pub browsers: Vec<NameCount>,
+	pub oses: Vec<NameCount>,
 }
 
 #[derive(FromRow)]
@@ -486,12 +515,14 @@ impl Events {
 		ev: &NewEvent,
 	) -> Result<()> {
 		let conn = self.db.get().await?;
+		let device = ev.device.as_ref();
 
 		conn.connection()
 			.execute(
 				"INSERT INTO events
-				(site_id, path, referrer, is_unique, key, data)
-				VALUES ($1, $2, $3, $4, $5, $6)",
+				(site_id, path, referrer, is_unique, key, data, device, browser,
+				os)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
 				&[
 					site_id,
 					&ev.path,
@@ -499,6 +530,9 @@ impl Events {
 					&ev.is_unique,
 					&ev.key,
 					&ev.data,
+					&device.map(|d| d.kind),
+					&device.map(|d| d.browser),
+					&device.map(|d| d.os),
 				],
 			)
 			.await?;
@@ -643,6 +677,26 @@ impl Events {
 			)
 			.await?;
 
+		// the columns are fixed names, not input
+		let mut by = Vec::new();
+		for column in ["device", "browser", "os"] {
+			let counts: Vec<NameCount> = conn
+				.query(
+					&format!(
+						"SELECT e.{column} AS name, count(*) AS visitors
+						FROM events e
+						WHERE e.site_id = $1 AND e.key IS NULL AND e.is_unique
+							AND {IN_RANGE}
+						GROUP BY 1 ORDER BY visitors DESC, 1
+						LIMIT 100"
+					),
+					&params,
+				)
+				.await?;
+			by.push(counts);
+		}
+		let [devices, browsers, oses] = by.try_into().expect("three columns");
+
 		Ok(Stats {
 			hourly: range.hourly(),
 			range,
@@ -652,6 +706,9 @@ impl Events {
 			pages,
 			referrers,
 			keys,
+			devices,
+			browsers,
+			oses,
 		})
 	}
 
@@ -795,6 +852,9 @@ mod tests {
 	use super::*;
 	use serde_json::json;
 
+	const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) \
+		AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
+
 	fn payload(v: Value) -> Payload {
 		serde_json::from_value(v).unwrap()
 	}
@@ -818,18 +878,20 @@ mod tests {
 			"h": "soerenmeier.ch", "p": "/blog/",
 			"r": "https://www.google.com/", "n": "navigate"
 		}))
-		.into_event("soerenmeier.ch")
+		.into_event("soerenmeier.ch", UA)
 		.unwrap();
 
 		assert_eq!(ev.path, "/blog");
 		assert_eq!(ev.referrer.as_deref(), Some("google.com"));
 		assert!(ev.is_unique);
+		let device = ev.device.unwrap();
+		assert_eq!((device.kind, device.browser), ("desktop", "Chrome"));
 	}
 
 	#[test]
 	fn direct_visit_is_a_visitor() {
 		let ev = payload(json!({ "h": "a.ch", "p": "/", "r": "" }))
-			.into_event("a.ch")
+			.into_event("a.ch", UA)
 			.unwrap();
 
 		assert_eq!(ev.path, "/");
@@ -848,7 +910,7 @@ mod tests {
 		let spa = payload(json!({ "h": "a.ch", "p": "/x", "s": true }));
 
 		for p in [from_site, reload, back, spa] {
-			let ev = p.into_event("a.ch").unwrap();
+			let ev = p.into_event("a.ch", UA).unwrap();
 			assert!(!ev.is_unique);
 			assert_eq!(ev.referrer, None);
 		}
@@ -860,7 +922,7 @@ mod tests {
 			"h": "webtoolbelt.dev", "p": "/dns", "k": "lookup_domain",
 			"d": { "domain": "example.com", "n": 2, "empty": null }
 		}))
-		.into_event("webtoolbelt.dev")
+		.into_event("webtoolbelt.dev", UA)
 		.unwrap();
 
 		assert_eq!(ev.key.as_deref(), Some("lookup_domain"));
@@ -868,7 +930,7 @@ mod tests {
 		assert!(!ev.is_unique);
 
 		let no_data = payload(json!({ "h": "a.ch", "p": "/", "k": "login" }))
-			.into_event("a.ch")
+			.into_event("a.ch", UA)
 			.unwrap();
 		assert_eq!(no_data.data, None);
 	}
@@ -884,7 +946,7 @@ mod tests {
 		];
 
 		for v in bad {
-			assert!(payload(v).into_event("a.ch").is_err());
+			assert!(payload(v).into_event("a.ch", UA).is_err());
 		}
 	}
 

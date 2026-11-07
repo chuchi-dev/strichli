@@ -19,6 +19,8 @@
 		if (nav.webdriver) return;
 
 		data.h = l.hostname;
+		// tells an iPad, which says it's a Mac, from a Mac
+		if (nav.maxTouchPoints > 1) data.t = true;
 		var body;
 		try {
 			body = JSON.stringify(data);

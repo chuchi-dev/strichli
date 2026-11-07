@@ -10,6 +10,7 @@ use crate::error::{Error, Result};
 use crate::limits::ClientIp;
 use crate::sites::normalize_domain;
 
+use super::device::Device;
 use super::{Payload, is_bot, noscript_pageview};
 
 const SCRIPT: &str = include_str!("./s.js");
@@ -44,7 +45,8 @@ async fn collect(
 	state.collect_limits.check(ip)?;
 
 	let header = |name| headers.get(name).and_then(|v| v.to_str().ok());
-	if is_bot(header(header::USER_AGENT)) {
+	let user_agent = header(header::USER_AGENT);
+	if is_bot(user_agent) {
 		return Ok(StatusCode::NO_CONTENT);
 	}
 
@@ -66,7 +68,7 @@ async fn collect(
 		.ok_or(Error::NotFound)?;
 	// many addresses can't flood one site either
 	state.site_limits.check(site_id)?;
-	let event = payload.into_event(&domain)?;
+	let event = payload.into_event(&domain, user_agent.unwrap_or_default())?;
 	state.events.insert(&site_id, &event).await?;
 
 	Ok(StatusCode::NO_CONTENT)
@@ -100,13 +102,16 @@ async fn noscript_inner(
 	state.collect_limits.check(ip)?;
 
 	let header = |name| headers.get(name).and_then(|v| v.to_str().ok());
-	if is_bot(header(header::USER_AGENT)) {
+	let Some(user_agent) =
+		header(header::USER_AGENT).filter(|ua| !is_bot(Some(ua)))
+	else {
 		return Ok(());
-	}
+	};
 
 	let page = header(header::REFERER)
 		.ok_or_else(|| Error::Invalid("no referer".into()))?;
-	let (domain, event) = noscript_pageview(page)?;
+	let (domain, mut event) = noscript_pageview(page)?;
+	event.device = Some(Device::from_agent(user_agent, false));
 	let site_id = state
 		.sites
 		.by_domain(&domain)

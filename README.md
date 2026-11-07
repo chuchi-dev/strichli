@@ -1,8 +1,10 @@
 # strichli
 
-Cookieless analytics for our sites: visitors, pageviews, pages, referrers
-and custom keys. No cookies, nothing stored in the browser, no ip or user
-agent in the database, so no consent banner is needed.
+Cookieless analytics for our sites: visitors, pageviews, pages, referrers,
+devices, browsers, operating systems and custom keys. No cookies, nothing
+stored in the browser, no ip or user agent in the database (only the kind
+of device, the browser and the os taken from it), so no consent banner is
+needed.
 
 - `server/` the axum server: the tracking script (`/s.js`), the collect
   endpoint (`/e`), the api under `/api` and the built webui
@@ -47,7 +49,10 @@ changes sites, a read token gets `READ_ONLY` there.
 - `PUT /api/sites/{id}` `{ "domain", "name" }`
 - `GET /api/sites/{id}/stats?range=7d` or `?from=YYYY-MM-DD&to=YYYY-MM-DD`:
   presets `today`, `7d`, `30d`, `90d`, `12m` count back from today in the
-  configured timezone, at most 5 years; the answer has the `range` it shows
+  configured timezone, at most 5 years; the answer has the `range` it shows,
+  visitors by day or hour, pages, referrers, keys, and `devices`,
+  `browsers`, `oses` (visitors by name, `null` for visits from before
+  2026-11-07 and imported ones)
 - `GET /api/sites/{id}/events?range=…&fields=domain,plan[&key=…]` the
   events grouped by key and the values of up to 5 data fields, with the
   fields there are
@@ -120,6 +125,9 @@ proxy.
 
 - No cookies, nothing in the browser's storage. The database has no ip,
   user agent or visitor id; the ip only counts against in-memory limits.
+  Of the user agent only the device (mobile, tablet, desktop), the browser
+  family and the os family are kept, the script adds whether there is a
+  touch screen (tells an iPad from a Mac).
 - The proxy's access log still sees ip, user agent and referer of `/e`,
   `/s.js` and `/noscript.gif`; turn it off for them if that matters.
 - Session tokens, api tokens and password links are 32 random bytes, only

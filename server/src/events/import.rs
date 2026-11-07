@@ -42,6 +42,7 @@ pub fn parse_line(line: &str, domain: &str) -> Option<ImportedEvent> {
 				== Some(true),
 			key: None,
 			data: None,
+			device: None,
 		}
 	} else {
 		let key = check_key(datapoint).ok()?;
@@ -64,6 +65,7 @@ pub fn parse_line(line: &str, domain: &str) -> Option<ImportedEvent> {
 			is_unique: false,
 			key: Some(key),
 			data: check_data(data).ok().flatten(),
+			device: None,
 		}
 	};
 
