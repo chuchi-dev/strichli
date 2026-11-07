@@ -1,5 +1,6 @@
 <script module lang="ts">
 	import { getEvents, getSite, getStats } from '@/api/sites';
+	import { listUsers } from '@/api/users';
 	import { rangeFromProps } from '@/lib/range';
 	import { session } from '@/lib/session.svelte';
 
@@ -34,7 +35,8 @@
 			return { ...base, stats: await getStats(props.id, query) };
 		}
 
-		return base;
+		// settings
+		return { ...base, users: await listUsers() };
 	}
 </script>
 
@@ -47,6 +49,7 @@
 		Stats,
 	} from '@/api/sites';
 	import { deleteSite, updateSite } from '@/api/sites';
+	import type { UserWithSites } from '@/api/users';
 	import BarList from '@/components/BarList.svelte';
 	import Button from '@/components/Button.svelte';
 	import Chart from '@/components/Chart.svelte';
@@ -55,6 +58,7 @@
 	import Field from '@/components/Field.svelte';
 	import Form from '@/components/Form.svelte';
 	import RangePicker from '@/components/RangePicker.svelte';
+	import SiteAccess from '@/components/SiteAccess.svelte';
 	import { num } from '@/lib/format';
 	import { go } from '@/lib/router.svelte';
 
@@ -66,6 +70,8 @@
 		stats?: Stats;
 		events?: EventTable;
 		columns?: string[];
+		/** everyone, for the access in the settings */
+		users?: UserWithSites[];
 		/** just added, show how to include the script */
 		new?: string;
 	};
@@ -78,6 +84,7 @@
 		stats,
 		events,
 		columns = [],
+		users = [],
 		new: isNew,
 	}: Loaded = $props();
 
@@ -262,6 +269,9 @@
 		{#if deleteError}
 			<p class="error">{deleteError}</p>
 		{/if}
+
+		<h2 class="space-top">Access</h2>
+		<SiteAccess siteId={site.id} {users} />
 	</div>
 {/if}
 
